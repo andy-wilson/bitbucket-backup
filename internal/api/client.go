@@ -26,7 +26,7 @@ type Client struct {
 	httpClient  *http.Client
 	baseURL     string
 	username    string
-	appPassword string
+	password    string // password, API token, or access token
 	rateLimiter *RateLimiter
 }
 
@@ -58,13 +58,16 @@ func NewClient(cfg *config.Config, opts ...ClientOption) *Client {
 		MaxBackoffSeconds:      cfg.RateLimit.MaxBackoffSeconds,
 	}
 
+	// Get the appropriate credentials for API calls
+	username, password := cfg.GetAPICredentials()
+
 	c := &Client{
 		httpClient: &http.Client{
 			Timeout: DefaultTimeout,
 		},
 		baseURL:     BaseURL,
-		username:    cfg.Auth.Username,
-		appPassword: cfg.Auth.AppPassword,
+		username:    username,
+		password:    password,
 		rateLimiter: NewRateLimiter(rlConfig),
 	}
 
@@ -156,7 +159,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 		}
 
 		// Set authentication
-		req.SetBasicAuth(c.username, c.appPassword)
+		req.SetBasicAuth(c.username, c.password)
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := c.httpClient.Do(req)

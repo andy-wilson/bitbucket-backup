@@ -360,7 +360,8 @@ func (b *Backup) backupRepository(ctx context.Context, baseDir string, repo *api
 		return nil
 	}
 
-	authURL := git.AuthenticatedURL(cloneURL, b.cfg.Auth.Username, b.cfg.Auth.AppPassword)
+	gitUser, gitPass := b.cfg.GetGitCredentials()
+	authURL := git.AuthenticatedURL(cloneURL, gitUser, gitPass)
 
 	fullGitPath := filepath.Join(b.storage.BasePath(), gitDir)
 	if _, err := os.Stat(fullGitPath); os.IsNotExist(err) {

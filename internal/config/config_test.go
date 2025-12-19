@@ -310,3 +310,171 @@ parallelism:
 		t.Fatal("expected error for zero git workers")
 	}
 }
+
+func TestParse_APITokenMethod(t *testing.T) {
+	yaml := `
+workspace: "my-workspace"
+auth:
+  method: "api_token"
+  username: "myuser"
+  email: "myuser@example.com"
+  api_token: "my-api-token"
+storage:
+  type: "local"
+  path: "/backups"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Auth.Method != "api_token" {
+		t.Errorf("expected auth.method = 'api_token', got '%s'", cfg.Auth.Method)
+	}
+	if cfg.Auth.Username != "myuser" {
+		t.Errorf("expected auth.username = 'myuser', got '%s'", cfg.Auth.Username)
+	}
+	if cfg.Auth.Email != "myuser@example.com" {
+		t.Errorf("expected auth.email = 'myuser@example.com', got '%s'", cfg.Auth.Email)
+	}
+	if cfg.Auth.APIToken != "my-api-token" {
+		t.Errorf("expected auth.api_token = 'my-api-token', got '%s'", cfg.Auth.APIToken)
+	}
+}
+
+func TestParse_APITokenMethod_MissingEmail(t *testing.T) {
+	yaml := `
+workspace: "my-workspace"
+auth:
+  method: "api_token"
+  username: "myuser"
+  api_token: "my-api-token"
+storage:
+  type: "local"
+  path: "/backups"
+`
+	_, err := Parse([]byte(yaml))
+	if err == nil {
+		t.Fatal("expected error for missing email with api_token method")
+	}
+}
+
+func TestParse_AccessTokenMethod(t *testing.T) {
+	yaml := `
+workspace: "my-workspace"
+auth:
+  method: "access_token"
+  access_token: "repo-access-token"
+storage:
+  type: "local"
+  path: "/backups"
+`
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Auth.Method != "access_token" {
+		t.Errorf("expected auth.method = 'access_token', got '%s'", cfg.Auth.Method)
+	}
+	if cfg.Auth.AccessToken != "repo-access-token" {
+		t.Errorf("expected auth.access_token = 'repo-access-token', got '%s'", cfg.Auth.AccessToken)
+	}
+}
+
+func TestGetAPICredentials_AppPassword(t *testing.T) {
+	cfg := Default()
+	cfg.Workspace = "test"
+	cfg.Auth.Method = "app_password"
+	cfg.Auth.Username = "user"
+	cfg.Auth.AppPassword = "pass"
+
+	username, password := cfg.GetAPICredentials()
+	if username != "user" {
+		t.Errorf("expected username = 'user', got '%s'", username)
+	}
+	if password != "pass" {
+		t.Errorf("expected password = 'pass', got '%s'", password)
+	}
+}
+
+func TestGetAPICredentials_APIToken(t *testing.T) {
+	cfg := Default()
+	cfg.Workspace = "test"
+	cfg.Auth.Method = "api_token"
+	cfg.Auth.Username = "user"
+	cfg.Auth.Email = "user@example.com"
+	cfg.Auth.APIToken = "token123"
+
+	username, password := cfg.GetAPICredentials()
+	if username != "user" {
+		t.Errorf("expected username = 'user', got '%s'", username)
+	}
+	if password != "token123" {
+		t.Errorf("expected password = 'token123', got '%s'", password)
+	}
+}
+
+func TestGetAPICredentials_AccessToken(t *testing.T) {
+	cfg := Default()
+	cfg.Workspace = "test"
+	cfg.Auth.Method = "access_token"
+	cfg.Auth.AccessToken = "repo-token"
+
+	username, password := cfg.GetAPICredentials()
+	if username != "x-token-auth" {
+		t.Errorf("expected username = 'x-token-auth', got '%s'", username)
+	}
+	if password != "repo-token" {
+		t.Errorf("expected password = 'repo-token', got '%s'", password)
+	}
+}
+
+func TestGetGitCredentials_AppPassword(t *testing.T) {
+	cfg := Default()
+	cfg.Workspace = "test"
+	cfg.Auth.Method = "app_password"
+	cfg.Auth.Username = "user"
+	cfg.Auth.AppPassword = "pass"
+
+	username, password := cfg.GetGitCredentials()
+	if username != "user" {
+		t.Errorf("expected username = 'user', got '%s'", username)
+	}
+	if password != "pass" {
+		t.Errorf("expected password = 'pass', got '%s'", password)
+	}
+}
+
+func TestGetGitCredentials_APIToken(t *testing.T) {
+	cfg := Default()
+	cfg.Workspace = "test"
+	cfg.Auth.Method = "api_token"
+	cfg.Auth.Username = "user"
+	cfg.Auth.Email = "user@example.com"
+	cfg.Auth.APIToken = "token123"
+
+	username, password := cfg.GetGitCredentials()
+	// API tokens require email for git operations
+	if username != "user@example.com" {
+		t.Errorf("expected username = 'user@example.com', got '%s'", username)
+	}
+	if password != "token123" {
+		t.Errorf("expected password = 'token123', got '%s'", password)
+	}
+}
+
+func TestGetGitCredentials_AccessToken(t *testing.T) {
+	cfg := Default()
+	cfg.Workspace = "test"
+	cfg.Auth.Method = "access_token"
+	cfg.Auth.AccessToken = "repo-token"
+
+	username, password := cfg.GetGitCredentials()
+	if username != "x-token-auth" {
+		t.Errorf("expected username = 'x-token-auth', got '%s'", username)
+	}
+	if password != "repo-token" {
+		t.Errorf("expected password = 'repo-token', got '%s'", password)
+	}
+}

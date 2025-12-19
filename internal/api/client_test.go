@@ -57,8 +57,8 @@ func TestNewClient(t *testing.T) {
 	if client.username != "testuser" {
 		t.Errorf("expected username = 'testuser', got '%s'", client.username)
 	}
-	if client.appPassword != "testpass" {
-		t.Errorf("expected appPassword = 'testpass', got '%s'", client.appPassword)
+	if client.password != "testpass" {
+		t.Errorf("expected password = 'testpass', got '%s'", client.password)
 	}
 	if client.baseURL != BaseURL {
 		t.Errorf("expected baseURL = '%s', got '%s'", BaseURL, client.baseURL)

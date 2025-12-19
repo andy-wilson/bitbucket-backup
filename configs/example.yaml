@@ -6,16 +6,30 @@ workspace: "your-workspace-slug"
 
 # Authentication settings
 auth:
-  # Authentication method: "app_password" or "oauth"
-  method: "app_password"
-  
-  # For app_password method:
-  # Create an app password at: https://bitbucket.org/account/settings/app-passwords/
+  # Authentication method: "api_token", "access_token", "app_password", or "oauth"
+  # Note: app_password is deprecated and will stop working June 9, 2026
+  method: "api_token"
+
+  # For api_token method (RECOMMENDED):
+  # Create an API token at: https://bitbucket.org/account/settings/api-tokens/
   # Required scopes: repository (read), pullrequest (read), issue (read), project (read), account (read)
+  # IMPORTANT: API tokens require username for API calls and email for git operations
   username: "${BITBUCKET_USERNAME}"
-  app_password: "${BITBUCKET_APP_PASSWORD}"
-  
+  email: "${BITBUCKET_EMAIL}"
+  api_token: "${BITBUCKET_API_TOKEN}"
+
+  # For access_token method (repository/project/workspace access tokens):
+  # Create in repository/project/workspace settings
+  # method: "access_token"
+  # access_token: "${BITBUCKET_ACCESS_TOKEN}"
+
+  # For app_password method (DEPRECATED - will stop working June 9, 2026):
+  # method: "app_password"
+  # username: "${BITBUCKET_USERNAME}"
+  # app_password: "${BITBUCKET_APP_PASSWORD}"
+
   # For oauth method (uncomment if using):
+  # method: "oauth"
   # client_id: "${BITBUCKET_CLIENT_ID}"
   # client_secret: "${BITBUCKET_CLIENT_SECRET}"
 

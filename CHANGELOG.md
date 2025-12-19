@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### API Token Authentication
+- Support for Bitbucket API tokens (`api_token` auth method)
+- Support for Repository/Project/Workspace access tokens (`access_token` auth method)
+- Automatic credential handling: username for API, email for git operations
+- Backward compatibility with deprecated app passwords
+
 ## [0.4.0] - 2025-12-19
 
 ### Added

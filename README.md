@@ -232,6 +232,51 @@ bb-backup version
 
 ## Configuration
 
+### Authentication Methods
+
+bb-backup supports multiple authentication methods:
+
+#### API Token (Recommended)
+
+API tokens are the recommended authentication method as Bitbucket is deprecating app passwords.
+
+```yaml
+auth:
+  method: "api_token"
+  username: "your-username"        # Bitbucket username (for API calls)
+  email: "your-email@example.com"  # Email address (for git operations)
+  api_token: "${BITBUCKET_API_TOKEN}"
+```
+
+Create an API token at: https://bitbucket.org/account/settings/api-tokens/
+
+**Important:** API tokens require:
+- Your **username** for API calls
+- Your **email** for git clone/fetch operations
+
+#### Access Token (Repository/Project/Workspace)
+
+Access tokens provide scoped access without a user account:
+
+```yaml
+auth:
+  method: "access_token"
+  access_token: "${BITBUCKET_ACCESS_TOKEN}"
+```
+
+Create access tokens in repository/project/workspace settings.
+
+#### App Password (Deprecated)
+
+App passwords are deprecated and will stop working on June 9, 2026.
+
+```yaml
+auth:
+  method: "app_password"
+  username: "${BITBUCKET_USERNAME}"
+  app_password: "${BITBUCKET_APP_PASSWORD}"
+```
+
 ### Config File
 
 Create a `bb-backup.yaml` file:
@@ -240,9 +285,10 @@ Create a `bb-backup.yaml` file:
 workspace: "your-workspace"
 
 auth:
-  method: "app_password"
+  method: "api_token"
   username: "${BITBUCKET_USERNAME}"
-  app_password: "${BITBUCKET_APP_PASSWORD}"
+  email: "${BITBUCKET_EMAIL}"
+  api_token: "${BITBUCKET_API_TOKEN}"
 
 storage:
   type: "local"
@@ -278,7 +324,8 @@ Config values can reference environment variables using `${VAR_NAME}` syntax:
 ```yaml
 auth:
   username: "${BITBUCKET_USERNAME}"
-  app_password: "${BITBUCKET_APP_PASSWORD}"
+  email: "${BITBUCKET_EMAIL}"
+  api_token: "${BITBUCKET_API_TOKEN}"
 ```
 
 You can also use environment variables directly without a config file:

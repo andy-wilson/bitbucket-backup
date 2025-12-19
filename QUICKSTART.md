@@ -40,10 +40,12 @@ Verify installation:
 bb-backup version
 ```
 
-## Step 2: Create a Bitbucket App Password
+## Step 2: Create a Bitbucket API Token
 
-1. Go to [Bitbucket App Passwords](https://bitbucket.org/account/settings/app-passwords/)
-2. Click **Create app password**
+Bitbucket has deprecated App Passwords in favor of API Tokens. Create one:
+
+1. Go to [Bitbucket API Tokens](https://bitbucket.org/account/settings/api-tokens/)
+2. Click **Create API token**
 3. Give it a name like "bb-backup"
 4. Select these permissions:
    - **Account**: Read
@@ -52,8 +54,11 @@ bb-backup version
    - **Repositories**: Read
    - **Pull requests**: Read
    - **Issues**: Read
-5. Click **Create**
-6. **Copy the password** - you won't be able to see it again!
+5. Set an expiration date (max 1 year)
+6. Click **Create**
+7. **Copy the token** - you won't be able to see it again!
+
+**Note:** If you have an existing App Password, it will continue to work until June 9, 2026.
 
 ## Step 3: Set Up Credentials
 
@@ -61,14 +66,20 @@ Set your credentials as environment variables:
 
 ```bash
 export BITBUCKET_USERNAME="your-bitbucket-username"
-export BITBUCKET_APP_PASSWORD="your-app-password"
+export BITBUCKET_EMAIL="your-email@example.com"
+export BITBUCKET_API_TOKEN="your-api-token"
 ```
+
+**Important:** API tokens require:
+- Your **username** for API calls
+- Your **email** for git clone/fetch operations
 
 To make these permanent, add them to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```bash
 echo 'export BITBUCKET_USERNAME="your-username"' >> ~/.bashrc
-echo 'export BITBUCKET_APP_PASSWORD="your-app-password"' >> ~/.bashrc
+echo 'export BITBUCKET_EMAIL="your-email@example.com"' >> ~/.bashrc
+echo 'export BITBUCKET_API_TOKEN="your-api-token"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
@@ -104,9 +115,10 @@ Create `bb-backup.yaml`:
 workspace: "your-workspace"
 
 auth:
-  method: "app_password"
+  method: "api_token"
   username: "${BITBUCKET_USERNAME}"
-  app_password: "${BITBUCKET_APP_PASSWORD}"
+  email: "${BITBUCKET_EMAIL}"
+  api_token: "${BITBUCKET_API_TOKEN}"
 
 storage:
   type: "local"
@@ -208,7 +220,7 @@ crontab -e
 Add a daily backup at 2 AM:
 
 ```cron
-0 2 * * * BITBUCKET_USERNAME=user BITBUCKET_APP_PASSWORD=pass /usr/local/bin/bb-backup backup -c /path/to/bb-backup.yaml >> /var/log/bb-backup.log 2>&1
+0 2 * * * BITBUCKET_USERNAME=user BITBUCKET_EMAIL=user@example.com BITBUCKET_API_TOKEN=token /usr/local/bin/bb-backup backup -c /path/to/bb-backup.yaml >> /var/log/bb-backup.log 2>&1
 ```
 
 ### Using systemd timer (Linux)
@@ -224,7 +236,8 @@ After=network.target
 Type=oneshot
 User=backup
 Environment="BITBUCKET_USERNAME=user"
-Environment="BITBUCKET_APP_PASSWORD=pass"
+Environment="BITBUCKET_EMAIL=user@example.com"
+Environment="BITBUCKET_API_TOKEN=token"
 ExecStart=/usr/local/bin/bb-backup backup -c /etc/bb-backup/config.yaml
 ```
 
@@ -260,9 +273,10 @@ Bitbucket limits API requests to ~1000/hour. For large workspaces:
 
 ### "authentication failed"
 
-- Verify your app password has the required scopes
+- Verify your API token has the required scopes
 - Check that `BITBUCKET_USERNAME` is your Bitbucket username (not email)
-- Ensure the app password hasn't expired
+- For API tokens, ensure `BITBUCKET_EMAIL` is set for git operations
+- Ensure the token hasn't expired (API tokens have max 1 year expiry)
 
 ### "git clone failed"
 

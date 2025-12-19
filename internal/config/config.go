@@ -25,7 +25,10 @@ type Config struct {
 type AuthConfig struct {
 	Method       string `yaml:"method"`
 	Username     string `yaml:"username"`
-	AppPassword  string `yaml:"app_password"`
+	Email        string `yaml:"email"`         // Email for git operations with API tokens
+	AppPassword  string `yaml:"app_password"`  // Deprecated: use api_token instead
+	APIToken     string `yaml:"api_token"`     // Personal API token (replaces app_password)
+	AccessToken  string `yaml:"access_token"`  // Repository/Project/Workspace access token
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
 }
@@ -150,6 +153,38 @@ func expandEnvVars(s string) string {
 	})
 }
 
+// GetAPICredentials returns the username and password/token for API authentication.
+func (c *Config) GetAPICredentials() (username, password string) {
+	switch c.Auth.Method {
+	case "app_password":
+		return c.Auth.Username, c.Auth.AppPassword
+	case "api_token":
+		return c.Auth.Username, c.Auth.APIToken
+	case "access_token":
+		// Access tokens use "x-token-auth" as the username
+		return "x-token-auth", c.Auth.AccessToken
+	default:
+		return c.Auth.Username, c.Auth.AppPassword
+	}
+}
+
+// GetGitCredentials returns the username and password/token for git operations.
+// For API tokens, git requires email instead of username.
+func (c *Config) GetGitCredentials() (username, password string) {
+	switch c.Auth.Method {
+	case "app_password":
+		return c.Auth.Username, c.Auth.AppPassword
+	case "api_token":
+		// Git operations with API tokens require email as username
+		return c.Auth.Email, c.Auth.APIToken
+	case "access_token":
+		// Access tokens use "x-token-auth" as the username
+		return "x-token-auth", c.Auth.AccessToken
+	default:
+		return c.Auth.Username, c.Auth.AppPassword
+	}
+}
+
 // Validate checks that the configuration is valid.
 func (c *Config) Validate() error {
 	var errs []string
@@ -161,11 +196,28 @@ func (c *Config) Validate() error {
 	// Validate auth
 	switch c.Auth.Method {
 	case "app_password":
+		// Deprecated but still supported for backward compatibility
 		if c.Auth.Username == "" {
 			errs = append(errs, "auth.username is required for app_password method")
 		}
 		if c.Auth.AppPassword == "" {
 			errs = append(errs, "auth.app_password is required for app_password method")
+		}
+	case "api_token":
+		// Personal API token - requires username for API, email for git
+		if c.Auth.Username == "" {
+			errs = append(errs, "auth.username is required for api_token method")
+		}
+		if c.Auth.APIToken == "" {
+			errs = append(errs, "auth.api_token is required for api_token method")
+		}
+		if c.Auth.Email == "" {
+			errs = append(errs, "auth.email is required for api_token method (used for git operations)")
+		}
+	case "access_token":
+		// Repository/Project/Workspace access token - no username needed
+		if c.Auth.AccessToken == "" {
+			errs = append(errs, "auth.access_token is required for access_token method")
 		}
 	case "oauth":
 		if c.Auth.ClientID == "" {
@@ -177,7 +229,7 @@ func (c *Config) Validate() error {
 	case "":
 		errs = append(errs, "auth.method is required")
 	default:
-		errs = append(errs, fmt.Sprintf("auth.method must be 'app_password' or 'oauth', got '%s'", c.Auth.Method))
+		errs = append(errs, fmt.Sprintf("auth.method must be 'app_password', 'api_token', 'access_token', or 'oauth', got '%s'", c.Auth.Method))
 	}
 
 	// Validate storage
