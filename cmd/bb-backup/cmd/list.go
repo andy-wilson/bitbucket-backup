@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	listJSON            bool
-	listExcludeRepos    []string
-	listIncludeRepos    []string
+	listJSON         bool
+	listExcludeRepos []string
+	listIncludeRepos []string
 )
 
 var listCmd = &cobra.Command{
@@ -59,11 +59,11 @@ func init() {
 
 // ListOutput represents the JSON output for the list command.
 type ListOutput struct {
-	Workspace    string              `json:"workspace"`
-	Projects     []ProjectOutput     `json:"projects"`
-	Personal     []RepositoryOutput  `json:"personal"`
-	TotalRepos   int                 `json:"total_repos"`
-	FilteredOut  int                 `json:"filtered_out"`
+	Workspace   string             `json:"workspace"`
+	Projects    []ProjectOutput    `json:"projects"`
+	Personal    []RepositoryOutput `json:"personal"`
+	TotalRepos  int                `json:"total_repos"`
+	FilteredOut int                `json:"filtered_out"`
 }
 
 // ProjectOutput represents a project in JSON output.
@@ -82,7 +82,7 @@ type RepositoryOutput struct {
 	Size        int64  `json:"size,omitempty"`
 }
 
-func runList(cmd *cobra.Command, args []string) error {
+func runList(_ *cobra.Command, _ []string) error {
 	// Load configuration
 	cfg, err := loadListConfig()
 	if err != nil {
@@ -144,7 +144,8 @@ func runList(cmd *cobra.Command, args []string) error {
 		return outputListJSON(cfg.Workspace, projects, reposByProject, personalRepos, len(repos), filteredOut)
 	}
 
-	return outputListText(cfg.Workspace, projects, reposByProject, personalRepos, len(repos), filteredOut)
+	outputListText(cfg.Workspace, projects, reposByProject, personalRepos, len(repos), filteredOut)
+	return nil
 }
 
 func outputListJSON(workspace string, projects []api.Project, reposByProject map[string][]api.Repository, personalRepos []api.Repository, totalRepos, filteredOut int) error {
@@ -190,7 +191,7 @@ func outputListJSON(workspace string, projects []api.Project, reposByProject map
 	return enc.Encode(output)
 }
 
-func outputListText(workspace string, projects []api.Project, reposByProject map[string][]api.Repository, personalRepos []api.Repository, totalRepos, filteredOut int) error {
+func outputListText(workspace string, projects []api.Project, reposByProject map[string][]api.Repository, personalRepos []api.Repository, totalRepos, filteredOut int) {
 	fmt.Printf("Workspace: %s\n\n", workspace)
 
 	// Print projects and their repos
@@ -219,8 +220,6 @@ func outputListText(workspace string, projects []api.Project, reposByProject map
 	if filteredOut > 0 {
 		fmt.Printf("Filtered out: %d repositories (by include/exclude patterns)\n", filteredOut)
 	}
-
-	return nil
 }
 
 func loadListConfig() (*config.Config, error) {

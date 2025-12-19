@@ -79,7 +79,7 @@ func init() {
 	backupCmd.Flags().StringArrayVar(&includeRepos, "include", nil, "only include repos matching glob pattern")
 }
 
-func runBackup(cmd *cobra.Command, args []string) error {
+func runBackup(_ *cobra.Command, _ []string) error {
 	// Load configuration
 	cfg, err := loadConfig()
 	if err != nil {

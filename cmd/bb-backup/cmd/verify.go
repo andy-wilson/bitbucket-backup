@@ -48,12 +48,12 @@ func init() {
 
 // VerifyResult represents the result of verification.
 type VerifyResult struct {
-	Path         string           `json:"path"`
-	Valid        bool             `json:"valid"`
-	Manifest     *ManifestCheck   `json:"manifest"`
-	Repositories []RepoCheck      `json:"repositories"`
-	Errors       []string         `json:"errors,omitempty"`
-	Summary      VerifySummary    `json:"summary"`
+	Path         string         `json:"path"`
+	Valid        bool           `json:"valid"`
+	Manifest     *ManifestCheck `json:"manifest"`
+	Repositories []RepoCheck    `json:"repositories"`
+	Errors       []string       `json:"errors,omitempty"`
+	Summary      VerifySummary  `json:"summary"`
 }
 
 // ManifestCheck represents manifest verification.
@@ -68,12 +68,12 @@ type ManifestCheck struct {
 
 // RepoCheck represents a repository verification.
 type RepoCheck struct {
-	Slug       string       `json:"slug"`
-	Project    string       `json:"project,omitempty"`
-	GitCheck   *GitCheck    `json:"git,omitempty"`
-	JSONChecks []JSONCheck  `json:"json_checks,omitempty"`
-	Valid      bool         `json:"valid"`
-	Errors     []string     `json:"errors,omitempty"`
+	Slug       string      `json:"slug"`
+	Project    string      `json:"project,omitempty"`
+	GitCheck   *GitCheck   `json:"git,omitempty"`
+	JSONChecks []JSONCheck `json:"json_checks,omitempty"`
+	Valid      bool        `json:"valid"`
+	Errors     []string    `json:"errors,omitempty"`
 }
 
 // GitCheck represents git fsck result.
@@ -103,15 +103,15 @@ type VerifySummary struct {
 
 // Manifest represents the backup manifest structure.
 type Manifest struct {
-	Workspace   string `json:"workspace"`
-	Timestamp   string `json:"timestamp"`
+	Workspace    string `json:"workspace"`
+	Timestamp    string `json:"timestamp"`
 	Repositories []struct {
 		Slug    string `json:"slug"`
 		Project string `json:"project,omitempty"`
 	} `json:"repositories"`
 }
 
-func runVerify(cmd *cobra.Command, args []string) error {
+func runVerify(_ *cobra.Command, args []string) error {
 	backupPath := args[0]
 
 	result := &VerifyResult{
@@ -207,10 +207,15 @@ func verifyManifest(backupPath string) *ManifestCheck {
 
 func verifyRepositoriesFromManifest(backupPath string, result *VerifyResult) {
 	manifestPath := filepath.Join(backupPath, "manifest.json")
-	data, _ := os.ReadFile(manifestPath)
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return
+	}
 
 	var manifest Manifest
-	json.Unmarshal(data, &manifest)
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return
+	}
 
 	for _, repo := range manifest.Repositories {
 		var repoPath string

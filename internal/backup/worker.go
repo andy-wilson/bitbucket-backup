@@ -18,9 +18,9 @@ type repoJob struct {
 
 // repoResult represents the result of a repository backup.
 type repoResult struct {
-	repo   *api.Repository
-	stats  repoStats
-	err    error
+	repo  *api.Repository
+	stats repoStats
+	err   error
 }
 
 // repoStats tracks stats for a single repository backup.

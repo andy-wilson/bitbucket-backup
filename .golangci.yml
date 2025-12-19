@@ -1,46 +1,44 @@
 # golangci-lint configuration
 # See: https://golangci-lint.run/usage/configuration/
 
+version: "2"
+
 run:
   timeout: 5m
   modules-download-mode: readonly
+  tests: false
 
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - unconvert
     - unparam
     - gocritic
     - revive
     - errorlint
-    - exportloopref
     - nilerr
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 linters-settings:
   errcheck:
     check-type-assertions: true
     check-blank: true
-  
+
   govet:
     enable-all: true
-  
-  gofmt:
-    simplify: true
-  
-  goimports:
-    local-prefixes: github.com/andy-wilson/bb-backup
-  
+
   misspell:
     locale: UK
-  
+
   revive:
     rules:
       - name: blank-imports
@@ -61,7 +59,51 @@ linters-settings:
       - name: indent-error-flow
       - name: errorf
 
+formatters-settings:
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/andy-wilson/bb-backup
+
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    # Ignore errcheck in test files
+    - path: "(.+)_test\\.go"
+      linters:
+        - errcheck
+        - errorlint
+        - revive
+    # Ignore defer resp.Body.Close() error - standard Go idiom
+    - linters:
+        - errcheck
+      text: "Error return value of .* is not checked"
+      source: "defer .*\\.Close\\(\\)"
+    # Ignore fmt.Fprint* to stdout - errors unlikely and not critical
+    - linters:
+        - errcheck
+      text: "Error return value of `fmt\\.Fprint"
+    # Ignore unused cobra command parameter (required by cobra signature)
+    - linters:
+        - revive
+      text: "unused-parameter: parameter 'cmd' seems to be unused"
+    # Ignore unused http.Request parameter (common pattern)
+    - linters:
+        - revive
+      text: "unused-parameter.*http\\.Request"
+    # Allow stuttering in API error type name
+    - linters:
+        - revive
+      text: "type name will be used as api.APIError"
+    # Ignore var-naming for package api (it's intentional)
+    - path: "internal/api/"
+      linters:
+        - revive
+      text: "var-naming"
+    # Ignore nil check for len (valid Go pattern)
+    - linters:
+        - staticcheck
+      text: "S1009"

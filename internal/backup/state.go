@@ -13,12 +13,12 @@ const StateFileName = ".bb-backup-state.json"
 
 // State tracks the state of previous backups for incremental support.
 type State struct {
-	Version           string                   `json:"version"`
-	Workspace         string                   `json:"workspace"`
-	LastFullBackup    string                   `json:"last_full_backup,omitempty"`
-	LastIncremental   string                   `json:"last_incremental,omitempty"`
-	Projects          map[string]ProjectState  `json:"projects"`
-	Repositories      map[string]RepoState     `json:"repositories"`
+	Version         string                  `json:"version"`
+	Workspace       string                  `json:"workspace"`
+	LastFullBackup  string                  `json:"last_full_backup,omitempty"`
+	LastIncremental string                  `json:"last_incremental,omitempty"`
+	Projects        map[string]ProjectState `json:"projects"`
+	Repositories    map[string]RepoState    `json:"repositories"`
 }
 
 // ProjectState tracks the state of a project.
@@ -29,12 +29,12 @@ type ProjectState struct {
 
 // RepoState tracks the state of a repository.
 type RepoState struct {
-	UUID              string `json:"uuid"`
-	ProjectKey        string `json:"project_key,omitempty"`
-	LastCommit        string `json:"last_commit,omitempty"`
-	LastPRUpdated     string `json:"last_pr_updated,omitempty"`
-	LastIssueUpdated  string `json:"last_issue_updated,omitempty"`
-	LastBackedUp      string `json:"last_backed_up"`
+	UUID             string `json:"uuid"`
+	ProjectKey       string `json:"project_key,omitempty"`
+	LastCommit       string `json:"last_commit,omitempty"`
+	LastPRUpdated    string `json:"last_pr_updated,omitempty"`
+	LastIssueUpdated string `json:"last_issue_updated,omitempty"`
+	LastBackedUp     string `json:"last_backed_up"`
 }
 
 // NewState creates a new empty state.

@@ -137,7 +137,7 @@ func (p *Progress) emitLocked(eventType, message string) {
 			ElapsedSec: time.Since(p.startTime).Seconds(),
 		}
 		data, _ := json.Marshal(event)
-		fmt.Fprintln(os.Stdout, string(data))
+		_, _ = fmt.Fprintln(os.Stdout, string(data))
 	} else if message != "" {
 		fmt.Printf("[%d/%d] %s\n", p.completed+p.failed, p.total, message)
 	}

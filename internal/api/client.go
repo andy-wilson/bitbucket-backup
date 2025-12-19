@@ -97,7 +97,7 @@ type Error struct {
 }
 
 // APIError is returned when the API returns an error response.
-type APIError struct {
+type APIError struct { //nolint:revive // intentional naming for clarity
 	StatusCode int
 	Message    string
 }
@@ -166,7 +166,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 		if err != nil {
 			return nil, fmt.Errorf("executing request: %w", err)
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck // closing response body
 
 		// Read response body
 		respBody, err := io.ReadAll(resp.Body)

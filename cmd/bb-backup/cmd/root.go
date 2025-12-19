@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -82,9 +81,4 @@ func getConfigPath() string {
 	}
 
 	return ""
-}
-
-// printError prints an error message to stderr.
-func printError(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 }

@@ -1,5 +1,5 @@
 // Package api provides a Bitbucket Cloud API client with rate limiting.
-package api
+package api //nolint:revive // package name is intentional
 
 import (
 	"math"

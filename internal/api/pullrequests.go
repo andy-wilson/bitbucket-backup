@@ -8,26 +8,26 @@ import (
 
 // PullRequest represents a Bitbucket pull request.
 type PullRequest struct {
-	Type              string       `json:"type"`
-	ID                int          `json:"id"`
-	Title             string       `json:"title"`
-	Description       string       `json:"description"`
-	State             string       `json:"state"`
-	MergeCommit       *Commit      `json:"merge_commit,omitempty"`
-	CloseSourceBranch bool         `json:"close_source_branch"`
-	ClosedBy          *User        `json:"closed_by,omitempty"`
-	Author            *User        `json:"author"`
-	Reason            string       `json:"reason"`
-	CreatedOn         string       `json:"created_on"`
-	UpdatedOn         string       `json:"updated_on"`
-	Destination       *PREndpoint  `json:"destination"`
-	Source            *PREndpoint  `json:"source"`
-	Links             Links        `json:"links"`
-	Summary           *PRSummary   `json:"summary,omitempty"`
-	Reviewers         []User       `json:"reviewers,omitempty"`
+	Type              string        `json:"type"`
+	ID                int           `json:"id"`
+	Title             string        `json:"title"`
+	Description       string        `json:"description"`
+	State             string        `json:"state"`
+	MergeCommit       *Commit       `json:"merge_commit,omitempty"`
+	CloseSourceBranch bool          `json:"close_source_branch"`
+	ClosedBy          *User         `json:"closed_by,omitempty"`
+	Author            *User         `json:"author"`
+	Reason            string        `json:"reason"`
+	CreatedOn         string        `json:"created_on"`
+	UpdatedOn         string        `json:"updated_on"`
+	Destination       *PREndpoint   `json:"destination"`
+	Source            *PREndpoint   `json:"source"`
+	Links             Links         `json:"links"`
+	Summary           *PRSummary    `json:"summary,omitempty"`
+	Reviewers         []User        `json:"reviewers,omitempty"`
 	Participants      []Participant `json:"participants,omitempty"`
-	TaskCount         int          `json:"task_count"`
-	CommentCount      int          `json:"comment_count"`
+	TaskCount         int           `json:"task_count"`
+	CommentCount      int           `json:"comment_count"`
 }
 
 // Commit represents a git commit.
@@ -96,11 +96,11 @@ type Inline struct {
 
 // PRActivity represents an activity entry on a PR.
 type PRActivity struct {
-	Type     string       `json:"type,omitempty"`
-	Approval *PRApproval  `json:"approval,omitempty"`
-	Update   *PRUpdate    `json:"update,omitempty"`
-	Comment  *PRComment   `json:"comment,omitempty"`
-	Changes  *PRChanges   `json:"changes_requested,omitempty"`
+	Type     string      `json:"type,omitempty"`
+	Approval *PRApproval `json:"approval,omitempty"`
+	Update   *PRUpdate   `json:"update,omitempty"`
+	Comment  *PRComment  `json:"comment,omitempty"`
+	Changes  *PRChanges  `json:"changes_requested,omitempty"`
 }
 
 // PRApproval represents an approval on a PR.
@@ -111,15 +111,15 @@ type PRApproval struct {
 
 // PRUpdate represents a PR update event.
 type PRUpdate struct {
-	Date        string `json:"date"`
-	Author      *User  `json:"author"`
+	Date        string      `json:"date"`
+	Author      *User       `json:"author"`
 	Source      *PREndpoint `json:"source,omitempty"`
 	Destination *PREndpoint `json:"destination,omitempty"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-	State       string `json:"state,omitempty"`
-	Reviewers   []User `json:"reviewers,omitempty"`
+	Title       string      `json:"title,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
+	State       string      `json:"state,omitempty"`
+	Reviewers   []User      `json:"reviewers,omitempty"`
 }
 
 // PRChanges represents a changes requested event.

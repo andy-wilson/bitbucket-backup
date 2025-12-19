@@ -3,30 +3,31 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
 // Issue represents a Bitbucket issue.
 type Issue struct {
-	Type       string       `json:"type"`
-	ID         int          `json:"id"`
-	Title      string       `json:"title"`
-	Reporter   *User        `json:"reporter"`
-	Assignee   *User        `json:"assignee,omitempty"`
-	State      string       `json:"state"`
-	Kind       string       `json:"kind"`
-	Priority   string       `json:"priority"`
-	Milestone  *Milestone   `json:"milestone,omitempty"`
-	Version    *Version     `json:"version,omitempty"`
-	Component  *Component   `json:"component,omitempty"`
-	Votes      int          `json:"votes"`
-	Watches    int          `json:"watches"`
-	Content    *Content     `json:"content,omitempty"`
-	CreatedOn  string       `json:"created_on"`
-	UpdatedOn  string       `json:"updated_on"`
-	EditedOn   string       `json:"edited_on,omitempty"`
-	Links      Links        `json:"links"`
-	Repository *Repository  `json:"repository,omitempty"`
+	Type       string      `json:"type"`
+	ID         int         `json:"id"`
+	Title      string      `json:"title"`
+	Reporter   *User       `json:"reporter"`
+	Assignee   *User       `json:"assignee,omitempty"`
+	State      string      `json:"state"`
+	Kind       string      `json:"kind"`
+	Priority   string      `json:"priority"`
+	Milestone  *Milestone  `json:"milestone,omitempty"`
+	Version    *Version    `json:"version,omitempty"`
+	Component  *Component  `json:"component,omitempty"`
+	Votes      int         `json:"votes"`
+	Watches    int         `json:"watches"`
+	Content    *Content    `json:"content,omitempty"`
+	CreatedOn  string      `json:"created_on"`
+	UpdatedOn  string      `json:"updated_on"`
+	EditedOn   string      `json:"edited_on,omitempty"`
+	Links      Links       `json:"links"`
+	Repository *Repository `json:"repository,omitempty"`
 }
 
 // Milestone represents a project milestone.
@@ -97,7 +98,8 @@ func (c *Client) GetIssues(ctx context.Context, workspace, repoSlug string) ([]I
 	values, err := c.GetPaginated(ctx, path)
 	if err != nil {
 		// Check if it's a 404 - issue tracker might be disabled
-		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 404 {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
 			return []Issue{}, nil
 		}
 		return nil, fmt.Errorf("fetching issues for %s/%s: %w", workspace, repoSlug, err)
@@ -178,7 +180,8 @@ func (c *Client) GetIssuesUpdatedSince(ctx context.Context, workspace, repoSlug,
 	values, err := c.GetPaginated(ctx, path)
 	if err != nil {
 		// Check if it's a 404 - issue tracker might be disabled
-		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == 404 {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 404 {
 			return []Issue{}, nil
 		}
 		return nil, fmt.Errorf("fetching updated issues: %w", err)

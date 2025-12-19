@@ -25,10 +25,10 @@ type Config struct {
 type AuthConfig struct {
 	Method       string `yaml:"method"`
 	Username     string `yaml:"username"`
-	Email        string `yaml:"email"`         // Email for git operations with API tokens
-	AppPassword  string `yaml:"app_password"`  // Deprecated: use api_token instead
-	APIToken     string `yaml:"api_token"`     // Personal API token (replaces app_password)
-	AccessToken  string `yaml:"access_token"`  // Repository/Project/Workspace access token
+	Email        string `yaml:"email"`        // Email for git operations with API tokens
+	AppPassword  string `yaml:"app_password"` // Deprecated: use api_token instead
+	APIToken     string `yaml:"api_token"`    // Personal API token (replaces app_password)
+	AccessToken  string `yaml:"access_token"` // Repository/Project/Workspace access token
 	ClientID     string `yaml:"client_id"`
 	ClientSecret string `yaml:"client_secret"`
 }
