@@ -188,7 +188,8 @@ func (b *Backup) Run(ctx context.Context) error {
 
 	elapsed := time.Since(startTime)
 	b.log.Info("Backup completed in %s", elapsed.Round(time.Second))
-	b.log.Info("Stats: %d projects, %d repos backed up, %d failed", stats.Projects, stats.Repos, stats.Failed)
+	b.log.Info("Stats: %d projects, %d repos, %d PRs, %d issues, %d failed",
+		stats.Projects, stats.Repos, stats.PullRequests, stats.Issues, stats.Failed)
 
 	return nil
 }
@@ -205,6 +206,22 @@ func (b *Backup) backupRepository(ctx context.Context, baseDir string, repo *api
 		}
 	}
 
+	// Backup pull requests if enabled
+	if b.cfg.Backup.IncludePRs {
+		if err := b.backupPullRequests(ctx, repoDir, repo, stats); err != nil {
+			b.log.Error("  Failed to backup PRs for %s: %v", repo.Slug, err)
+			// Continue with other backups
+		}
+	}
+
+	// Backup issues if enabled
+	if b.cfg.Backup.IncludeIssues && repo.HasIssues {
+		if err := b.backupIssues(ctx, repoDir, repo, stats); err != nil {
+			b.log.Error("  Failed to backup issues for %s: %v", repo.Slug, err)
+			// Continue with other backups
+		}
+	}
+
 	// Clone/fetch the git repository
 	cloneURL := repo.CloneURL()
 	if cloneURL == "" {
@@ -215,7 +232,7 @@ func (b *Backup) backupRepository(ctx context.Context, baseDir string, repo *api
 	gitDir := filepath.Join(repoDir, "repo.git")
 
 	if b.opts.DryRun {
-		b.log.Info("  [DRY RUN] Would clone %s to %s", cloneURL, gitDir)
+		b.log.Info("  [DRY RUN] Would clone %s", repo.Slug)
 		return nil
 	}
 
@@ -239,6 +256,127 @@ func (b *Backup) backupRepository(ctx context.Context, baseDir string, repo *api
 	return nil
 }
 
+func (b *Backup) backupPullRequests(ctx context.Context, repoDir string, repo *api.Repository, stats *backupStats) error {
+	b.log.Debug("  Fetching pull requests for %s", repo.Slug)
+
+	// Fetch all PRs in all states
+	prs, err := b.client.GetAllPullRequests(ctx, b.cfg.Workspace, repo.Slug)
+	if err != nil {
+		return fmt.Errorf("fetching pull requests: %w", err)
+	}
+
+	if len(prs) == 0 {
+		b.log.Debug("  No pull requests found")
+		return nil
+	}
+
+	b.log.Debug("  Found %d pull requests", len(prs))
+	prDir := filepath.Join(repoDir, "pull-requests")
+
+	for _, pr := range prs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if b.opts.DryRun {
+			b.log.Debug("  [DRY RUN] Would backup PR #%d: %s", pr.ID, pr.Title)
+			stats.PullRequests++
+			continue
+		}
+
+		// Save PR metadata
+		prFile := fmt.Sprintf("%d.json", pr.ID)
+		if err := b.saveJSON(prDir, prFile, pr); err != nil {
+			b.log.Error("  Failed to save PR #%d: %v", pr.ID, err)
+			continue
+		}
+
+		prSubDir := filepath.Join(prDir, fmt.Sprintf("%d", pr.ID))
+
+		// Backup PR comments if enabled
+		if b.cfg.Backup.IncludePRComments {
+			comments, err := b.client.GetPullRequestComments(ctx, b.cfg.Workspace, repo.Slug, pr.ID)
+			if err != nil {
+				b.log.Error("  Failed to fetch comments for PR #%d: %v", pr.ID, err)
+			} else if len(comments) > 0 {
+				if err := b.saveJSON(prSubDir, "comments.json", comments); err != nil {
+					b.log.Error("  Failed to save comments for PR #%d: %v", pr.ID, err)
+				}
+			}
+		}
+
+		// Backup PR activity if enabled
+		if b.cfg.Backup.IncludePRActivity {
+			activity, err := b.client.GetPullRequestActivity(ctx, b.cfg.Workspace, repo.Slug, pr.ID)
+			if err != nil {
+				b.log.Error("  Failed to fetch activity for PR #%d: %v", pr.ID, err)
+			} else if len(activity) > 0 {
+				if err := b.saveJSON(prSubDir, "activity.json", activity); err != nil {
+					b.log.Error("  Failed to save activity for PR #%d: %v", pr.ID, err)
+				}
+			}
+		}
+
+		stats.PullRequests++
+	}
+
+	return nil
+}
+
+func (b *Backup) backupIssues(ctx context.Context, repoDir string, repo *api.Repository, stats *backupStats) error {
+	b.log.Debug("  Fetching issues for %s", repo.Slug)
+
+	issues, err := b.client.GetIssues(ctx, b.cfg.Workspace, repo.Slug)
+	if err != nil {
+		return fmt.Errorf("fetching issues: %w", err)
+	}
+
+	if len(issues) == 0 {
+		b.log.Debug("  No issues found (tracker may be disabled)")
+		return nil
+	}
+
+	b.log.Debug("  Found %d issues", len(issues))
+	issueDir := filepath.Join(repoDir, "issues")
+
+	for _, issue := range issues {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if b.opts.DryRun {
+			b.log.Debug("  [DRY RUN] Would backup issue #%d: %s", issue.ID, issue.Title)
+			stats.Issues++
+			continue
+		}
+
+		// Save issue metadata
+		issueFile := fmt.Sprintf("%d.json", issue.ID)
+		if err := b.saveJSON(issueDir, issueFile, issue); err != nil {
+			b.log.Error("  Failed to save issue #%d: %v", issue.ID, err)
+			continue
+		}
+
+		// Backup issue comments if enabled
+		if b.cfg.Backup.IncludeIssueComments {
+			issueSubDir := filepath.Join(issueDir, fmt.Sprintf("%d", issue.ID))
+
+			comments, err := b.client.GetIssueComments(ctx, b.cfg.Workspace, repo.Slug, issue.ID)
+			if err != nil {
+				b.log.Error("  Failed to fetch comments for issue #%d: %v", issue.ID, err)
+			} else if len(comments) > 0 {
+				if err := b.saveJSON(issueSubDir, "comments.json", comments); err != nil {
+					b.log.Error("  Failed to save comments for issue #%d: %v", issue.ID, err)
+				}
+			}
+		}
+
+		stats.Issues++
+	}
+
+	return nil
+}
+
 func (b *Backup) saveJSON(dir, filename string, data interface{}) error {
 	content, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -257,6 +395,8 @@ func (b *Backup) createManifest(startTime time.Time, stats *backupStats) *Manife
 		Stats: ManifestStats{
 			Projects:     stats.Projects,
 			Repositories: stats.Repos,
+			PullRequests: stats.PullRequests,
+			Issues:       stats.Issues,
 			Failed:       stats.Failed,
 		},
 		Options: ManifestOptions{
@@ -278,9 +418,11 @@ func filterPersonalRepos(repos []api.Repository) []api.Repository {
 }
 
 type backupStats struct {
-	Projects int
-	Repos    int
-	Failed   int
+	Projects     int
+	Repos        int
+	PullRequests int
+	Issues       int
+	Failed       int
 }
 
 // Manifest describes a backup.
@@ -297,6 +439,8 @@ type Manifest struct {
 type ManifestStats struct {
 	Projects     int `json:"projects"`
 	Repositories int `json:"repositories"`
+	PullRequests int `json:"pull_requests"`
+	Issues       int `json:"issues"`
 	Failed       int `json:"failed"`
 }
 
