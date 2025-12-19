@@ -1,0 +1,94 @@
+# bb-backup configuration file
+# Copy this to bb-backup.yaml and modify as needed
+
+# The Bitbucket workspace (organisation) to backup
+workspace: "your-workspace-slug"
+
+# Authentication settings
+auth:
+  # Authentication method: "app_password" or "oauth"
+  method: "app_password"
+  
+  # For app_password method:
+  # Create an app password at: https://bitbucket.org/account/settings/app-passwords/
+  # Required scopes: repository (read), pullrequest (read), issue (read), project (read), account (read)
+  username: "${BITBUCKET_USERNAME}"
+  app_password: "${BITBUCKET_APP_PASSWORD}"
+  
+  # For oauth method (uncomment if using):
+  # client_id: "${BITBUCKET_CLIENT_ID}"
+  # client_secret: "${BITBUCKET_CLIENT_SECRET}"
+
+# Storage settings
+storage:
+  # Storage type: "local" (s3 planned for future)
+  type: "local"
+  
+  # Path to store backups (must exist)
+  path: "/backups/bitbucket"
+
+# Rate limiting settings
+# Bitbucket Cloud allows ~1000 requests/hour for authenticated requests
+rate_limit:
+  # Target requests per hour (leave headroom below 1000)
+  requests_per_hour: 900
+  
+  # Maximum burst size for short periods
+  burst_size: 10
+  
+  # Maximum retry attempts on failure
+  max_retries: 5
+  
+  # Initial backoff in seconds when rate limited
+  retry_backoff_seconds: 5
+  
+  # Multiplier for exponential backoff
+  retry_backoff_multiplier: 2.0
+  
+  # Maximum backoff in seconds
+  max_backoff_seconds: 300
+
+# Parallelism settings
+parallelism:
+  # Number of parallel git clone/fetch operations
+  git_workers: 4
+  
+  # Number of parallel API request streams
+  api_workers: 2
+
+# Backup content settings
+backup:
+  # Include pull requests
+  include_prs: true
+  
+  # Include PR comments (requires include_prs)
+  include_pr_comments: true
+  
+  # Include PR activity/approvals (requires include_prs)
+  include_pr_activity: true
+  
+  # Include issues (if issue tracker is enabled on repo)
+  include_issues: true
+  
+  # Include issue comments (requires include_issues)
+  include_issue_comments: true
+  
+  # Exclude repositories matching these glob patterns
+  # Example: ["archive-*", "test-*", "deprecated/*"]
+  exclude_repos: []
+  
+  # Only include repositories matching these glob patterns
+  # If empty, all repos are included (minus exclusions)
+  # Example: ["core-*", "platform-*"]
+  include_repos: []
+
+# Logging settings
+logging:
+  # Log level: "debug", "info", "warn", "error"
+  level: "info"
+  
+  # Log format: "text" or "json"
+  format: "text"
+  
+  # Optional: Log to file instead of stdout
+  # file: "/var/log/bb-backup.log"

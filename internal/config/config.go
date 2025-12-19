@@ -54,13 +54,13 @@ type ParallelismConfig struct {
 
 // BackupConfig holds backup content settings.
 type BackupConfig struct {
-	IncludePRs         bool     `yaml:"include_prs"`
-	IncludePRComments  bool     `yaml:"include_pr_comments"`
-	IncludePRActivity  bool     `yaml:"include_pr_activity"`
-	IncludeIssues      bool     `yaml:"include_issues"`
-	IncludeIssueComments bool   `yaml:"include_issue_comments"`
-	ExcludeRepos       []string `yaml:"exclude_repos"`
-	IncludeRepos       []string `yaml:"include_repos"`
+	IncludePRs           bool     `yaml:"include_prs"`
+	IncludePRComments    bool     `yaml:"include_pr_comments"`
+	IncludePRActivity    bool     `yaml:"include_pr_activity"`
+	IncludeIssues        bool     `yaml:"include_issues"`
+	IncludeIssueComments bool     `yaml:"include_issue_comments"`
+	ExcludeRepos         []string `yaml:"exclude_repos"`
+	IncludeRepos         []string `yaml:"include_repos"`
 }
 
 // LoggingConfig holds logging settings.

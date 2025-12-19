@@ -20,10 +20,10 @@ type RateLimiter struct {
 	lastRefill time.Time
 
 	// Backoff settings
-	maxRetries       int
-	baseBackoff      time.Duration
+	maxRetries        int
+	baseBackoff       time.Duration
 	backoffMultiplier float64
-	maxBackoff       time.Duration
+	maxBackoff        time.Duration
 
 	// Current backoff state
 	consecutiveFailures int
