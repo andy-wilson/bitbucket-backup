@@ -6,15 +6,42 @@ This file provides context for Claude Code when working on this project.
 
 `bb-backup` is a Go CLI tool to backup Bitbucket Cloud workspaces including git repositories and metadata (projects, PRs, issues, comments).
 
+## Project Status
+
+**Completed Phases:**
+- Phase 1: Foundation (config, API client, CLI, git operations, storage)
+- Phase 2: Metadata Export (PRs, issues, comments, activity)
+- Phase 3: Robustness & Incremental (parallel execution, progress, filtering, state file)
+- Phase 4: Extended Features (partial - verify command, enhanced list command)
+
+**Remaining from Phase 4:**
+- OAuth authentication
+- S3 storage backend
+- `restore` command
+- Notifications (Slack, email)
+
 ## Key Files
 
-- `SPEC.md` - Full project specification with requirements, acceptance criteria, and phases
-- `cmd/bb-backup/main.go` - CLI entrypoint
-- `internal/api/` - Bitbucket API client with rate limiting
-- `internal/backup/` - Backup orchestration
-- `internal/config/` - Configuration handling
-- `internal/git/` - Git operations
-- `internal/storage/` - Storage backends
+| File | Purpose |
+|------|---------|
+| `SPEC.md` | Full project specification with requirements and acceptance criteria |
+| `QUICKSTART.md` | Getting started guide |
+| `cmd/bb-backup/main.go` | CLI entrypoint |
+| `cmd/bb-backup/cmd/` | CLI commands (backup, list, verify, version) |
+| `internal/api/` | Bitbucket API client with rate limiting |
+| `internal/api/client.go` | HTTP client with retry logic |
+| `internal/api/ratelimit.go` | Token bucket rate limiter |
+| `internal/api/pullrequests.go` | PR API methods |
+| `internal/api/issues.go` | Issue API methods |
+| `internal/backup/` | Backup orchestration |
+| `internal/backup/backup.go` | Main backup logic |
+| `internal/backup/worker.go` | Parallel worker pool |
+| `internal/backup/progress.go` | Progress reporting |
+| `internal/backup/filter.go` | Repository filtering |
+| `internal/backup/state.go` | State file for incremental backups |
+| `internal/config/` | Configuration handling |
+| `internal/git/` | Git operations (clone, fetch) |
+| `internal/storage/` | Storage backends (local filesystem) |
 
 ## Build Commands
 
@@ -50,35 +77,49 @@ make clean
 - Config supports environment variable substitution `${VAR_NAME}`
 - Output structure mirrors Bitbucket hierarchy: workspace/project/repo
 - Personal repos (no project) go under `personal/` directory
-- State file tracks last backup for incremental support
+- State file (`.bb-backup-state.json`) tracks last backup for incremental support
+- Worker pool enables parallel git operations
+- Filter supports glob patterns for include/exclude
 
 ## Common Tasks
 
 ### Adding a new API endpoint
 
 1. Add method to appropriate file in `internal/api/`
-2. Add model in `pkg/models/` if new entity
-3. Add unit test with mocked response in `testdata/fixtures/`
+2. Add model structs if new entity type
+3. Add unit test with mocked HTTP response
 
 ### Adding a new CLI command
 
-1. Add command in `cmd/bb-backup/`
-2. Wire up in `main.go`
-3. Update help text
+1. Create command file in `cmd/bb-backup/cmd/`
+2. Register in `init()` with `rootCmd.AddCommand()`
+3. Update help text and README.md
 
-## Current Phase
+### Running a dry-run backup
 
-**Phase 1: Foundation** - Building core infrastructure:
-- Config parsing
-- API client with rate limiting
-- Project/repo listing
-- Git mirror clone
-- Local storage
-- Basic CLI
+```bash
+bb-backup backup --dry-run -w your-workspace
+```
+
+### Verifying a backup
+
+```bash
+bb-backup verify /path/to/backup
+```
 
 ## Testing Without a Workspace
 
 Since no test workspace is available:
 - Use mocked API responses for unit tests
 - `--dry-run` flag for safe testing against production
-- `--integration-test` flag limits to 1-2 repos for quick validation
+- Verify command checks backup integrity without API access
+
+## Test Coverage
+
+Current test coverage by package:
+- `internal/config`: ~80%
+- `internal/api`: ~57%
+- `internal/storage`: ~84%
+- `internal/git`: ~45%
+- `internal/backup`: ~12%
+- `cmd/bb-backup/cmd`: ~31%
