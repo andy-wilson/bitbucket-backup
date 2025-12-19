@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-12-19
+
+### Added
+
+#### Phase 4: Extended Features (Partial)
+
+##### Enhanced List Command (`cmd/bb-backup/cmd/list.go`)
+- JSON output format with `--json` flag for automation
+- Repository filtering with `--include` and `--exclude` patterns
+- Shows filtered repository count when patterns applied
+- Detailed project/repository output structure
+
+##### Verify Command (`cmd/bb-backup/cmd/verify.go`)
+- Verify backup integrity with `bb-backup verify <path>`
+- Manifest validation (existence, valid JSON, contents)
+- Git repository verification using `git fsck`
+- JSON metadata file validation
+- Support for verifying PRs, issues, comments, and activity files
+- Text and JSON output formats (`--json` flag)
+- Verbose mode (`-v`) for detailed per-file results
+- Exit code 0 for pass, 1 for failure
+- Summary statistics (repos, git, JSON files)
+
+#### Tests
+- Verify command tests for manifest, git, and JSON validation
+- Directory scanning tests
+- Complete repository verification tests
+
 ## [0.3.0] - 2025-12-19
 
 ### Added
@@ -140,7 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unit tests for local storage backend
 - Unit tests for git URL authentication
 
-[Unreleased]: https://github.com/andy-wilson/bb-backup/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/andy-wilson/bb-backup/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/andy-wilson/bb-backup/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/andy-wilson/bb-backup/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/andy-wilson/bb-backup/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/andy-wilson/bb-backup/releases/tag/v0.1.0
