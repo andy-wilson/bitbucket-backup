@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/andy-wilson/bb-backup/internal/backup"
@@ -20,6 +21,9 @@ var (
 	parallel        int
 	username        string
 	appPassword     string
+	jsonProgress    bool
+	excludeRepos    []string
+	includeRepos    []string
 )
 
 var backupCmd = &cobra.Command{
@@ -31,14 +35,32 @@ This will backup:
   - Workspace metadata
   - All projects and their metadata
   - All repositories (git mirror clone)
-  - Pull requests, comments, and activity (Phase 2)
-  - Issues and comments (Phase 2)
+  - Pull requests, comments, and activity
+  - Issues and comments
+
+Backup modes:
+  --full         Force a full backup (ignore previous state)
+  --incremental  Force incremental (fail if no previous state)
+  (default)      Auto-detect: incremental if state exists, full otherwise
+
+Progress output:
+  --json-progress  Output progress as JSON lines (for automation)
+  --quiet          Suppress progress output
+  --verbose        Show detailed debug output
+
+Repository filtering:
+  --include "pattern"  Only include repos matching glob pattern
+  --exclude "pattern"  Exclude repos matching glob pattern
+  Patterns support * and ? wildcards (e.g., "core-*", "test-?-*")
 
 Examples:
   bb-backup backup -c config.yaml
   bb-backup backup -w my-workspace -o /backups
   bb-backup backup --dry-run
-  bb-backup backup --full`,
+  bb-backup backup --full
+  bb-backup backup --incremental
+  bb-backup backup --exclude "test-*" --exclude "archive-*"
+  bb-backup backup --include "core-*" --include "platform-*"`,
 	RunE: runBackup,
 }
 
@@ -52,6 +74,9 @@ func init() {
 	backupCmd.Flags().IntVar(&parallel, "parallel", 0, "parallel repo operations (overrides config)")
 	backupCmd.Flags().StringVar(&username, "username", "", "Bitbucket username")
 	backupCmd.Flags().StringVar(&appPassword, "app-password", "", "Bitbucket app password")
+	backupCmd.Flags().BoolVar(&jsonProgress, "json-progress", false, "output progress as JSON lines")
+	backupCmd.Flags().StringArrayVar(&excludeRepos, "exclude", nil, "exclude repos matching glob pattern")
+	backupCmd.Flags().StringArrayVar(&includeRepos, "include", nil, "only include repos matching glob pattern")
 }
 
 func runBackup(cmd *cobra.Command, args []string) error {
@@ -73,17 +98,20 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Println("\nReceived interrupt, shutting down gracefully...")
+		if !jsonProgress {
+			fmt.Println("\nReceived interrupt, shutting down gracefully...")
+		}
 		cancel()
 	}()
 
 	// Create and run backup
 	opts := backup.Options{
-		DryRun:      dryRun,
-		Full:        fullBackup,
-		Incremental: incrementalOnly,
-		Verbose:     verbose,
-		Quiet:       quiet,
+		DryRun:       dryRun,
+		Full:         fullBackup,
+		Incremental:  incrementalOnly,
+		Verbose:      verbose,
+		Quiet:        quiet,
+		JSONProgress: jsonProgress,
 	}
 
 	b, err := backup.New(cfg, opts)
@@ -165,4 +193,36 @@ func applyOverrides(cfg *config.Config) {
 	if parallel > 0 {
 		cfg.Parallelism.GitWorkers = parallel
 	}
+
+	// Apply filter overrides
+	if len(excludeRepos) > 0 {
+		cfg.Backup.ExcludeRepos = mergePatterns(cfg.Backup.ExcludeRepos, excludeRepos)
+	}
+	if len(includeRepos) > 0 {
+		cfg.Backup.IncludeRepos = mergePatterns(cfg.Backup.IncludeRepos, includeRepos)
+	}
+}
+
+// mergePatterns merges patterns from config and CLI, avoiding duplicates.
+func mergePatterns(existing, additional []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, p := range existing {
+		p = strings.TrimSpace(p)
+		if p != "" && !seen[p] {
+			seen[p] = true
+			result = append(result, p)
+		}
+	}
+
+	for _, p := range additional {
+		p = strings.TrimSpace(p)
+		if p != "" && !seen[p] {
+			seen[p] = true
+			result = append(result, p)
+		}
+	}
+
+	return result
 }
