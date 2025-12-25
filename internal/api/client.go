@@ -21,13 +21,18 @@ const (
 	DefaultTimeout = 30 * time.Second
 )
 
+// ProgressFunc is called during pagination to report progress.
+// It receives the current page number and total items fetched so far.
+type ProgressFunc func(page int, itemsSoFar int)
+
 // Client is a Bitbucket Cloud API client with built-in rate limiting.
 type Client struct {
-	httpClient  *http.Client
-	baseURL     string
-	username    string
-	password    string // password, API token, or access token
-	rateLimiter *RateLimiter
+	httpClient   *http.Client
+	baseURL      string
+	username     string
+	password     string // password, API token, or access token
+	rateLimiter  *RateLimiter
+	progressFunc ProgressFunc
 }
 
 // ClientOption is a function that configures a Client.
@@ -44,6 +49,13 @@ func WithHTTPClient(c *http.Client) ClientOption {
 func WithBaseURL(url string) ClientOption {
 	return func(client *Client) {
 		client.baseURL = url
+	}
+}
+
+// WithProgressFunc sets a callback for pagination progress.
+func WithProgressFunc(f ProgressFunc) ClientOption {
+	return func(client *Client) {
+		client.progressFunc = f
 	}
 }
 
@@ -116,8 +128,11 @@ func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 func (c *Client) GetPaginated(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var allValues []json.RawMessage
 	currentURL := c.baseURL + path
+	page := 0
 
 	for currentURL != "" {
+		page++
+
 		body, err := c.doURL(ctx, http.MethodGet, currentURL, nil)
 		if err != nil {
 			return nil, err
@@ -135,6 +150,12 @@ func (c *Client) GetPaginated(ctx context.Context, path string) ([]json.RawMessa
 		}
 
 		allValues = append(allValues, values...)
+
+		// Report progress if callback is set
+		if c.progressFunc != nil {
+			c.progressFunc(page, len(allValues))
+		}
+
 		currentURL = resp.Next
 	}
 

@@ -109,7 +109,14 @@ func runList(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
-	client := api.NewClient(cfg)
+	// Set up progress callback for verbose mode
+	var clientOpts []api.ClientOption
+	if verbose && !listJSON {
+		clientOpts = append(clientOpts, api.WithProgressFunc(func(page, items int) {
+			fmt.Fprintf(os.Stderr, "    Page %d: %d items fetched\n", page, items)
+		}))
+	}
+	client := api.NewClient(cfg, clientOpts...)
 
 	if !listJSON {
 		fmt.Fprintf(os.Stderr, "Fetching workspace data for %s...\n", cfg.Workspace)
