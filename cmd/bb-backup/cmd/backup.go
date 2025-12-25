@@ -104,13 +104,17 @@ func runBackup(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
+	// Determine verbosity from CLI flags or config
+	effectiveVerbose := verbose || cfg.Logging.Level == "debug"
+	effectiveQuiet := quiet || cfg.Logging.Level == "error"
+
 	// Create and run backup
 	opts := backup.Options{
 		DryRun:       dryRun,
 		Full:         fullBackup,
 		Incremental:  incrementalOnly,
-		Verbose:      verbose,
-		Quiet:        quiet,
+		Verbose:      effectiveVerbose,
+		Quiet:        effectiveQuiet,
 		JSONProgress: jsonProgress,
 	}
 

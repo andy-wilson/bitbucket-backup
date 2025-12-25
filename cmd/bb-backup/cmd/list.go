@@ -109,9 +109,12 @@ func runList(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
+	// Determine verbosity from CLI flags or config
+	effectiveVerbose := verbose || cfg.Logging.Level == "debug"
+
 	// Set up progress callback for verbose mode
 	var clientOpts []api.ClientOption
-	if verbose && !listJSON {
+	if effectiveVerbose && !listJSON {
 		clientOpts = append(clientOpts, api.WithProgressFunc(func(page, items int) {
 			fmt.Fprintf(os.Stderr, "    Page %d: %d items fetched\n", page, items)
 		}))
@@ -123,26 +126,26 @@ func runList(_ *cobra.Command, _ []string) error {
 	}
 
 	// Fetch projects
-	if verbose && !listJSON {
+	if effectiveVerbose && !listJSON {
 		fmt.Fprintf(os.Stderr, "  Fetching projects...\n")
 	}
 	projects, err := client.GetProjects(ctx, cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
-	if verbose && !listJSON {
+	if effectiveVerbose && !listJSON {
 		fmt.Fprintf(os.Stderr, "  Found %d projects\n", len(projects))
 	}
 
 	// Fetch all repositories
-	if verbose && !listJSON {
+	if effectiveVerbose && !listJSON {
 		fmt.Fprintf(os.Stderr, "  Fetching repositories (this may take a while)...\n")
 	}
 	allRepos, err := client.GetRepositories(ctx, cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching repositories: %w", err)
 	}
-	if verbose && !listJSON {
+	if effectiveVerbose && !listJSON {
 		fmt.Fprintf(os.Stderr, "  Found %d repositories\n", len(allRepos))
 	}
 
