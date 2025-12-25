@@ -7,6 +7,8 @@ bin/
 *.dylib
 /bb-backup
 
+backups
+
 # Test coverage
 coverage.out
 coverage.html

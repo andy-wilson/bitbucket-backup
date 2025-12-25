@@ -126,7 +126,7 @@ func Load(path string) (*Config, error) {
 // Environment variables in the format ${VAR_NAME} are substituted.
 func Parse(data []byte) (*Config, error) {
 	// Substitute environment variables before parsing
-	expanded := expandEnvVars(string(data))
+	expanded, unsetVars := expandEnvVars(string(data))
 
 	cfg := Default()
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
@@ -134,6 +134,10 @@ func Parse(data []byte) (*Config, error) {
 	}
 
 	if err := cfg.Validate(); err != nil {
+		// If validation fails and there are unset env vars, include that info
+		if len(unsetVars) > 0 {
+			return nil, fmt.Errorf("validating config: %w\n\nNote: The following environment variables were not set: %v", err, unsetVars)
+		}
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
@@ -145,12 +149,19 @@ var envVarRegex = regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 
 // expandEnvVars replaces ${VAR_NAME} with the value of the environment variable.
 // If the variable is not set, it is replaced with an empty string.
-func expandEnvVars(s string) string {
-	return envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
+// The second return value contains names of unset variables.
+func expandEnvVars(s string) (string, []string) {
+	var unsetVars []string
+	result := envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
 		// Extract variable name from ${VAR_NAME}
 		varName := match[2 : len(match)-1]
-		return os.Getenv(varName)
+		value := os.Getenv(varName)
+		if value == "" {
+			unsetVars = append(unsetVars, varName)
+		}
+		return value
 	})
+	return result, unsetVars
 }
 
 // GetAPICredentials returns the username and password/token for API authentication.
