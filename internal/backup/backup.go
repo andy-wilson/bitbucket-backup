@@ -22,6 +22,7 @@ type Options struct {
 	Verbose      bool
 	Quiet        bool
 	JSONProgress bool
+	Logger       Logger // Optional external logger
 }
 
 // Backup orchestrates the backup process.
@@ -97,17 +98,25 @@ func New(cfg *config.Config, opts Options) (*Backup, error) {
 	// Create repo filter
 	filter := NewRepoFilter(cfg.Backup.IncludeRepos, cfg.Backup.ExcludeRepos)
 
+	// Use provided logger or create default
+	var log Logger
+	if opts.Logger != nil {
+		log = opts.Logger
+	} else {
+		log = &defaultLogger{
+			verbose: opts.Verbose,
+			quiet:   opts.Quiet,
+		}
+	}
+
 	return &Backup{
 		cfg:     cfg,
 		opts:    opts,
 		client:  client,
 		storage: store,
-		log: &defaultLogger{
-			verbose: opts.Verbose,
-			quiet:   opts.Quiet,
-		},
-		state:  state,
-		filter: filter,
+		log:     log,
+		state:   state,
+		filter:  filter,
 	}, nil
 }
 

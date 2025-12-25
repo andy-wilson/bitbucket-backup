@@ -10,6 +10,7 @@ import (
 
 	"github.com/andy-wilson/bb-backup/internal/backup"
 	"github.com/andy-wilson/bb-backup/internal/config"
+	"github.com/andy-wilson/bb-backup/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -104,18 +105,39 @@ func runBackup(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
-	// Determine verbosity from CLI flags or config
-	effectiveVerbose := verbose || cfg.Logging.Level == "debug"
-	effectiveQuiet := quiet || cfg.Logging.Level == "error"
+	// Determine effective log level from CLI flags or config
+	effectiveLevel := cfg.Logging.Level
+	if verbose {
+		effectiveLevel = "debug"
+	} else if quiet {
+		effectiveLevel = "error"
+	}
+
+	// Create logger
+	log, err := logging.New(logging.Config{
+		Level:   effectiveLevel,
+		Format:  cfg.Logging.Format,
+		File:    cfg.Logging.File,
+		Console: cfg.Logging.File != "", // Also write to console if file logging enabled
+	})
+	if err != nil {
+		return fmt.Errorf("initializing logger: %w", err)
+	}
+	defer func() { _ = log.Close() }()
+
+	if cfg.Logging.File != "" {
+		fmt.Fprintf(os.Stderr, "Logging to file: %s\n", cfg.Logging.File)
+	}
 
 	// Create and run backup
 	opts := backup.Options{
 		DryRun:       dryRun,
 		Full:         fullBackup,
 		Incremental:  incrementalOnly,
-		Verbose:      effectiveVerbose,
-		Quiet:        effectiveQuiet,
+		Verbose:      log.IsDebug(),
+		Quiet:        log.IsQuiet(),
 		JSONProgress: jsonProgress,
+		Logger:       log,
 	}
 
 	b, err := backup.New(cfg, opts)

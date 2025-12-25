@@ -11,6 +11,7 @@ import (
 	"github.com/andy-wilson/bb-backup/internal/api"
 	"github.com/andy-wilson/bb-backup/internal/backup"
 	"github.com/andy-wilson/bb-backup/internal/config"
+	"github.com/andy-wilson/bb-backup/internal/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -97,6 +98,26 @@ func runList(_ *cobra.Command, _ []string) error {
 		cfg.Backup.IncludeRepos = mergePatterns(cfg.Backup.IncludeRepos, listIncludeRepos)
 	}
 
+	// Determine effective log level from CLI flags or config
+	effectiveLevel := cfg.Logging.Level
+	if verbose {
+		effectiveLevel = "debug"
+	} else if quiet {
+		effectiveLevel = "error"
+	}
+
+	// Create logger
+	log, err := logging.New(logging.Config{
+		Level:   effectiveLevel,
+		Format:  cfg.Logging.Format,
+		File:    cfg.Logging.File,
+		Console: cfg.Logging.File != "",
+	})
+	if err != nil {
+		return fmt.Errorf("initializing logger: %w", err)
+	}
+	defer func() { _ = log.Close() }()
+
 	// Set up context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -109,44 +130,41 @@ func runList(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
-	// Determine verbosity from CLI flags or config
-	effectiveVerbose := verbose || cfg.Logging.Level == "debug"
-
 	// Set up progress callback for verbose mode
 	var clientOpts []api.ClientOption
-	if effectiveVerbose && !listJSON {
+	if log.IsDebug() && !listJSON {
 		clientOpts = append(clientOpts, api.WithProgressFunc(func(page, items int) {
-			fmt.Fprintf(os.Stderr, "    Page %d: %d items fetched\n", page, items)
+			log.Debug("  Page %d: %d items fetched", page, items)
 		}))
 	}
 	client := api.NewClient(cfg, clientOpts...)
 
 	if !listJSON {
-		fmt.Fprintf(os.Stderr, "Fetching workspace data for %s...\n", cfg.Workspace)
+		log.Info("Fetching workspace data for %s...", cfg.Workspace)
 	}
 
 	// Fetch projects
-	if effectiveVerbose && !listJSON {
-		fmt.Fprintf(os.Stderr, "  Fetching projects...\n")
+	if log.IsDebug() && !listJSON {
+		log.Debug("Fetching projects...")
 	}
 	projects, err := client.GetProjects(ctx, cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
-	if effectiveVerbose && !listJSON {
-		fmt.Fprintf(os.Stderr, "  Found %d projects\n", len(projects))
+	if log.IsDebug() && !listJSON {
+		log.Debug("Found %d projects", len(projects))
 	}
 
 	// Fetch all repositories
-	if effectiveVerbose && !listJSON {
-		fmt.Fprintf(os.Stderr, "  Fetching repositories (this may take a while)...\n")
+	if log.IsDebug() && !listJSON {
+		log.Debug("Fetching repositories (this may take a while)...")
 	}
 	allRepos, err := client.GetRepositories(ctx, cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching repositories: %w", err)
 	}
-	if effectiveVerbose && !listJSON {
-		fmt.Fprintf(os.Stderr, "  Found %d repositories\n", len(allRepos))
+	if log.IsDebug() && !listJSON {
+		log.Debug("Found %d repositories", len(allRepos))
 	}
 
 	// Apply filters
