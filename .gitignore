@@ -39,3 +39,4 @@ config.yaml
 # Temporary files
 tmp/
 temp/
+_testing/

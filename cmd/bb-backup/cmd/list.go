@@ -111,16 +111,32 @@ func runList(_ *cobra.Command, _ []string) error {
 
 	client := api.NewClient(cfg)
 
+	if !listJSON {
+		fmt.Fprintf(os.Stderr, "Fetching workspace data for %s...\n", cfg.Workspace)
+	}
+
 	// Fetch projects
+	if verbose && !listJSON {
+		fmt.Fprintf(os.Stderr, "  Fetching projects...\n")
+	}
 	projects, err := client.GetProjects(ctx, cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
 	}
+	if verbose && !listJSON {
+		fmt.Fprintf(os.Stderr, "  Found %d projects\n", len(projects))
+	}
 
 	// Fetch all repositories
+	if verbose && !listJSON {
+		fmt.Fprintf(os.Stderr, "  Fetching repositories (this may take a while)...\n")
+	}
 	allRepos, err := client.GetRepositories(ctx, cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching repositories: %w", err)
+	}
+	if verbose && !listJSON {
+		fmt.Fprintf(os.Stderr, "  Found %d repositories\n", len(allRepos))
 	}
 
 	// Apply filters
