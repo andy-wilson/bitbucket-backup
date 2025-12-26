@@ -130,12 +130,15 @@ func runList(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
-	// Set up progress callback for verbose mode
+	// Set up API client with logging and progress callbacks
 	var clientOpts []api.ClientOption
-	if log.IsDebug() && !listJSON {
-		clientOpts = append(clientOpts, api.WithProgressFunc(func(page, items int) {
-			log.Debug("  Page %d: %d items fetched", page, items)
-		}))
+	if log.IsDebug() {
+		clientOpts = append(clientOpts, api.WithLogFunc(log.Debug))
+		if !listJSON {
+			clientOpts = append(clientOpts, api.WithProgressFunc(func(page, items int) {
+				log.Debug("  Page %d: %d items fetched", page, items)
+			}))
+		}
 	}
 	client := api.NewClient(cfg, clientOpts...)
 

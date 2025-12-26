@@ -407,8 +407,9 @@ func TestGetAPICredentials_APIToken(t *testing.T) {
 	cfg.Auth.APIToken = "token123"
 
 	username, password := cfg.GetAPICredentials()
-	if username != "user" {
-		t.Errorf("expected username = 'user', got '%s'", username)
+	// API tokens require email as the username
+	if username != "user@example.com" {
+		t.Errorf("expected username = 'user@example.com', got '%s'", username)
 	}
 	if password != "token123" {
 		t.Errorf("expected password = 'token123', got '%s'", password)
@@ -455,9 +456,9 @@ func TestGetGitCredentials_APIToken(t *testing.T) {
 	cfg.Auth.APIToken = "token123"
 
 	username, password := cfg.GetGitCredentials()
-	// API tokens require email for git operations
-	if username != "user@example.com" {
-		t.Errorf("expected username = 'user@example.com', got '%s'", username)
+	// Git operations with API tokens require username (not email)
+	if username != "user" {
+		t.Errorf("expected username = 'user', got '%s'", username)
 	}
 	if password != "token123" {
 		t.Errorf("expected password = 'token123', got '%s'", password)

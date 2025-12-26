@@ -25,6 +25,9 @@ const (
 // It receives the current page number and total items fetched so far.
 type ProgressFunc func(page int, itemsSoFar int)
 
+// LogFunc is called to log debug messages.
+type LogFunc func(msg string, args ...interface{})
+
 // Client is a Bitbucket Cloud API client with built-in rate limiting.
 type Client struct {
 	httpClient   *http.Client
@@ -33,6 +36,7 @@ type Client struct {
 	password     string // password, API token, or access token
 	rateLimiter  *RateLimiter
 	progressFunc ProgressFunc
+	logFunc      LogFunc
 }
 
 // ClientOption is a function that configures a Client.
@@ -56,6 +60,13 @@ func WithBaseURL(url string) ClientOption {
 func WithProgressFunc(f ProgressFunc) ClientOption {
 	return func(client *Client) {
 		client.progressFunc = f
+	}
+}
+
+// WithLogFunc sets a callback for debug logging.
+func WithLogFunc(f LogFunc) ClientOption {
+	return func(client *Client) {
+		client.logFunc = f
 	}
 }
 
@@ -170,9 +181,19 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) ([
 
 // doURL performs an HTTP request to an absolute URL.
 func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Reader) ([]byte, error) {
+	attempt := 0
 	for {
+		attempt++
+
 		// Wait for rate limiter
 		c.rateLimiter.Wait()
+
+		// Log the request
+		if c.logFunc != nil {
+			c.logFunc("API %s %s", method, fullURL)
+		}
+
+		startTime := time.Now()
 
 		req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 		if err != nil {
@@ -195,10 +216,29 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 			return nil, fmt.Errorf("reading response: %w", err)
 		}
 
+		elapsed := time.Since(startTime)
+
+		// Log response details
+		if c.logFunc != nil {
+			c.logFunc("  → %d %s (took %s, %s)",
+				resp.StatusCode, http.StatusText(resp.StatusCode),
+				elapsed.Round(time.Millisecond), formatBytes(len(respBody)))
+
+			// Log rate limit headers if present
+			if limit := resp.Header.Get("X-RateLimit-Limit"); limit != "" {
+				remaining := resp.Header.Get("X-RateLimit-Remaining")
+				reset := resp.Header.Get("X-RateLimit-Reset")
+				c.logFunc("  Rate limit: %s/%s remaining (resets: %s)", remaining, limit, reset)
+			}
+		}
+
 		// Handle rate limiting
 		if resp.StatusCode == http.StatusTooManyRequests {
 			backoff, shouldRetry := c.rateLimiter.OnRateLimited()
 			if !shouldRetry {
+				if c.logFunc != nil {
+					c.logFunc("  Rate limited: max retries (%d) reached, giving up", attempt)
+				}
 				return nil, &APIError{
 					StatusCode: resp.StatusCode,
 					Message:    "rate limit exceeded, max retries reached",
@@ -210,6 +250,10 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 				if seconds, err := strconv.Atoi(retryAfter); err == nil {
 					backoff = time.Duration(seconds) * time.Second
 				}
+			}
+
+			if c.logFunc != nil {
+				c.logFunc("  Rate limited: retry %d after %s backoff", attempt, backoff.Round(time.Second))
 			}
 
 			select {
@@ -239,6 +283,20 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 		c.rateLimiter.OnSuccess()
 		return respBody, nil
 	}
+}
+
+// formatBytes formats a byte count as a human-readable string.
+func formatBytes(bytes int) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := unit, 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMG"[exp])
 }
 
 // BuildURL constructs a URL with query parameters.

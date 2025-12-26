@@ -82,14 +82,17 @@ func New(cfg Config) (*Logger, error) {
 	}
 
 	if cfg.File != "" {
+		// Add timestamp to filename to avoid overwriting previous logs
+		logFile := addTimestampToFilename(cfg.File)
+
 		// Ensure directory exists
-		dir := filepath.Dir(cfg.File)
+		dir := filepath.Dir(logFile)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("creating log directory: %w", err)
 		}
 
-		// Open log file for append
-		f, err := os.OpenFile(cfg.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		// Open log file (create new file for each run)
+		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
 			return nil, fmt.Errorf("opening log file: %w", err)
 		}
@@ -101,9 +104,21 @@ func New(cfg Config) (*Logger, error) {
 		} else {
 			l.output = f
 		}
+
+		// Log the filename being used (to console if also logging there)
+		fmt.Fprintf(os.Stderr, "Logging to: %s\n", logFile)
 	}
 
 	return l, nil
+}
+
+// addTimestampToFilename inserts a timestamp before the file extension.
+// e.g., "bb-backup.log" -> "bb-backup-2025-12-26T22-15-30Z.log"
+func addTimestampToFilename(filename string) string {
+	ext := filepath.Ext(filename)
+	base := filename[:len(filename)-len(ext)]
+	timestamp := time.Now().UTC().Format("2006-01-02T15-04-05Z")
+	return fmt.Sprintf("%s-%s%s", base, timestamp, ext)
 }
 
 // Close closes the log file if open.
@@ -136,6 +151,11 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 		_, _ = fmt.Fprintln(l.output, string(data))
 	} else {
 		_, _ = fmt.Fprintf(l.output, "%s [%s] %s\n", timestamp, level.String(), formatted)
+	}
+
+	// Flush file to disk to ensure logs are written immediately
+	if l.file != nil {
+		_ = l.file.Sync()
 	}
 
 	// For errors, also write to stderr if we're logging to a file

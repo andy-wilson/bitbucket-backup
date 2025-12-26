@@ -25,6 +25,7 @@ var (
 	jsonProgress    bool
 	excludeRepos    []string
 	includeRepos    []string
+	singleRepo      string
 )
 
 var backupCmd = &cobra.Command{
@@ -50,6 +51,7 @@ Progress output:
   --verbose        Show detailed debug output
 
 Repository filtering:
+  --repo "slug"        Backup only a single repository (for testing)
   --include "pattern"  Only include repos matching glob pattern
   --exclude "pattern"  Exclude repos matching glob pattern
   Patterns support * and ? wildcards (e.g., "core-*", "test-?-*")
@@ -60,6 +62,7 @@ Examples:
   bb-backup backup --dry-run
   bb-backup backup --full
   bb-backup backup --incremental
+  bb-backup backup --repo my-single-repo
   bb-backup backup --exclude "test-*" --exclude "archive-*"
   bb-backup backup --include "core-*" --include "platform-*"`,
 	RunE: runBackup,
@@ -78,6 +81,7 @@ func init() {
 	backupCmd.Flags().BoolVar(&jsonProgress, "json-progress", false, "output progress as JSON lines")
 	backupCmd.Flags().StringArrayVar(&excludeRepos, "exclude", nil, "exclude repos matching glob pattern")
 	backupCmd.Flags().StringArrayVar(&includeRepos, "include", nil, "only include repos matching glob pattern")
+	backupCmd.Flags().StringVar(&singleRepo, "repo", "", "backup only a single repository (for testing)")
 }
 
 func runBackup(_ *cobra.Command, _ []string) error {
@@ -124,10 +128,6 @@ func runBackup(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("initializing logger: %w", err)
 	}
 	defer func() { _ = log.Close() }()
-
-	if cfg.Logging.File != "" {
-		fmt.Fprintf(os.Stderr, "Logging to file: %s\n", cfg.Logging.File)
-	}
 
 	// Create and run backup
 	opts := backup.Options{
@@ -226,6 +226,12 @@ func applyOverrides(cfg *config.Config) {
 	}
 	if len(includeRepos) > 0 {
 		cfg.Backup.IncludeRepos = mergePatterns(cfg.Backup.IncludeRepos, includeRepos)
+	}
+
+	// Single repo override (takes precedence over other filters)
+	if singleRepo != "" {
+		cfg.Backup.IncludeRepos = []string{singleRepo}
+		cfg.Backup.ExcludeRepos = []string{}
 	}
 }
 

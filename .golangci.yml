@@ -40,6 +40,7 @@ linters-settings:
     locale: UK
 
   revive:
+    enable-all-rules: false
     rules:
       - name: blank-imports
       - name: context-as-argument
@@ -50,7 +51,7 @@ linters-settings:
       - name: error-naming
       - name: exported
       - name: increment-decrement
-      - name: var-naming
+      # var-naming disabled - incorrectly flags "api" as "meaningless package name"
       - name: package-comments
       - name: range
       - name: receiver-naming
@@ -103,6 +104,10 @@ issues:
       linters:
         - revive
       text: "var-naming"
+    # Ignore "avoid meaningless package names" for api package
+    - linters:
+        - revive
+      source: "^package api$"
     # Ignore nil check for len (valid Go pattern)
     - linters:
         - staticcheck

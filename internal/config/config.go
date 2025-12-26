@@ -64,6 +64,7 @@ type BackupConfig struct {
 	IncludeIssueComments bool     `yaml:"include_issue_comments"`
 	ExcludeRepos         []string `yaml:"exclude_repos"`
 	IncludeRepos         []string `yaml:"include_repos"`
+	GitTimeoutMinutes    int      `yaml:"git_timeout_minutes"` // Timeout for git clone/fetch (default: 30)
 }
 
 // LoggingConfig holds logging settings.
@@ -103,6 +104,7 @@ func Default() *Config {
 			IncludeIssueComments: true,
 			ExcludeRepos:         []string{},
 			IncludeRepos:         []string{},
+			GitTimeoutMinutes:    30, // 30 minute default timeout for git operations
 		},
 		Logging: LoggingConfig{
 			Level:  "info",
@@ -170,7 +172,8 @@ func (c *Config) GetAPICredentials() (username, password string) {
 	case "app_password":
 		return c.Auth.Username, c.Auth.AppPassword
 	case "api_token":
-		return c.Auth.Username, c.Auth.APIToken
+		// API tokens require email as the username
+		return c.Auth.Email, c.Auth.APIToken
 	case "access_token":
 		// Access tokens use "x-token-auth" as the username
 		return "x-token-auth", c.Auth.AccessToken
@@ -180,14 +183,14 @@ func (c *Config) GetAPICredentials() (username, password string) {
 }
 
 // GetGitCredentials returns the username and password/token for git operations.
-// For API tokens, git requires email instead of username.
+// For API tokens, git requires the Bitbucket username (not email).
 func (c *Config) GetGitCredentials() (username, password string) {
 	switch c.Auth.Method {
 	case "app_password":
 		return c.Auth.Username, c.Auth.AppPassword
 	case "api_token":
-		// Git operations with API tokens require email as username
-		return c.Auth.Email, c.Auth.APIToken
+		// Git operations with API tokens require username (not email)
+		return c.Auth.Username, c.Auth.APIToken
 	case "access_token":
 		// Access tokens use "x-token-auth" as the username
 		return "x-token-auth", c.Auth.AccessToken

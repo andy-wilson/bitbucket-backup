@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/api"
 	"github.com/andy-wilson/bb-backup/internal/git"
@@ -50,12 +51,13 @@ func newWorkerPool(workers int) *workerPool {
 func (p *workerPool) start(ctx context.Context, b *Backup) {
 	for i := 0; i < p.workers; i++ {
 		p.wg.Add(1)
-		go p.worker(ctx, b)
+		workerID := i + 1
+		go p.worker(ctx, b, workerID)
 	}
 }
 
 // worker processes repository backup jobs.
-func (p *workerPool) worker(ctx context.Context, b *Backup) {
+func (p *workerPool) worker(ctx context.Context, b *Backup, workerID int) {
 	defer p.wg.Done()
 
 	for job := range p.jobs {
@@ -69,7 +71,11 @@ func (p *workerPool) worker(ctx context.Context, b *Backup) {
 		default:
 		}
 
-		stats, err := b.backupRepositoryWorker(ctx, job.baseDir, job.repo)
+		b.log.Debug("[worker-%d] Processing: %s", workerID, job.repo.Slug)
+		stats, err := b.backupRepositoryWorker(ctx, job.baseDir, job.repo, workerID)
+		if err == nil {
+			b.log.Debug("[worker-%d] Completed: %s", workerID, job.repo.Slug)
+		}
 		p.results <- repoResult{
 			repo:  job.repo,
 			stats: stats,
@@ -95,10 +101,8 @@ func (p *workerPool) wait() {
 }
 
 // backupRepositoryWorker is a worker-friendly version of backupRepository.
-func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, repo *api.Repository) (repoStats, error) {
+func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, repo *api.Repository, workerID int) (repoStats, error) {
 	var stats repoStats
-
-	b.log.Debug("  Backing up repository: %s", repo.Slug)
 
 	repoDir := baseDir + "/repositories/" + repo.Slug
 
@@ -111,24 +115,24 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 
 	// Backup pull requests if enabled
 	if b.cfg.Backup.IncludePRs {
-		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, repo)
+		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, repo, workerID)
 		if err != nil {
-			b.log.Error("  Failed to backup PRs for %s: %v", repo.Slug, err)
+			b.log.Error("[worker-%d] Failed to backup PRs for %s: %v", workerID, repo.Slug, err)
 		}
 		stats.PullRequests = prCount
 	}
 
 	// Backup issues if enabled
 	if b.cfg.Backup.IncludeIssues && repo.HasIssues {
-		issueCount, err := b.backupIssuesWorker(ctx, repoDir, repo)
+		issueCount, err := b.backupIssuesWorker(ctx, repoDir, repo, workerID)
 		if err != nil {
-			b.log.Error("  Failed to backup issues for %s: %v", repo.Slug, err)
+			b.log.Error("[worker-%d] Failed to backup issues for %s: %v", workerID, repo.Slug, err)
 		}
 		stats.Issues = issueCount
 	}
 
 	// Clone/fetch the git repository
-	if err := b.backupGitRepo(ctx, repoDir, repo); err != nil {
+	if err := b.backupGitRepo(ctx, repoDir, repo, workerID); err != nil {
 		return stats, err
 	}
 
@@ -136,7 +140,7 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 }
 
 // backupPullRequestsWorker is a worker-friendly version that returns count.
-func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, repo *api.Repository) (int, error) {
+func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, repo *api.Repository, workerID int) (int, error) {
 	prs, err := b.client.GetAllPullRequests(ctx, b.cfg.Workspace, repo.Slug)
 	if err != nil {
 		return 0, err
@@ -146,7 +150,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, r
 		return 0, nil
 	}
 
-	b.log.Debug("  Found %d pull requests for %s", len(prs), repo.Slug)
+	b.log.Debug("[worker-%d] Found %d pull requests for %s", workerID, len(prs), repo.Slug)
 	prDir := repoDir + "/pull-requests"
 	count := 0
 
@@ -161,7 +165,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, r
 		}
 
 		if err := b.savePR(ctx, prDir, repo.Slug, &pr); err != nil {
-			b.log.Error("  Failed to save PR #%d: %v", pr.ID, err)
+			b.log.Error("[worker-%d] Failed to save PR #%d: %v", workerID, pr.ID, err)
 			continue
 		}
 		count++
@@ -205,7 +209,7 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 }
 
 // backupIssuesWorker is a worker-friendly version that returns count.
-func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *api.Repository) (int, error) {
+func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *api.Repository, workerID int) (int, error) {
 	issues, err := b.client.GetIssues(ctx, b.cfg.Workspace, repo.Slug)
 	if err != nil {
 		return 0, err
@@ -215,7 +219,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *a
 		return 0, nil
 	}
 
-	b.log.Debug("  Found %d issues for %s", len(issues), repo.Slug)
+	b.log.Debug("[worker-%d] Found %d issues for %s", workerID, len(issues), repo.Slug)
 	issueDir := repoDir + "/issues"
 	count := 0
 
@@ -230,7 +234,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *a
 		}
 
 		if err := b.saveIssue(ctx, issueDir, repo.Slug, &issue); err != nil {
-			b.log.Error("  Failed to save issue #%d: %v", issue.ID, err)
+			b.log.Error("[worker-%d] Failed to save issue #%d: %v", workerID, issue.ID, err)
 			continue
 		}
 		count++
@@ -263,32 +267,57 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 }
 
 // backupGitRepo clones or fetches the git repository.
-func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository) error {
+func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository, workerID int) error {
 	cloneURL := repo.CloneURL()
 	if cloneURL == "" {
-		b.log.Debug("  No HTTPS clone URL found for %s, skipping git clone", repo.Slug)
+		b.log.Debug("[worker-%d] No HTTPS clone URL found for %s, skipping git clone", workerID, repo.Slug)
 		return nil
 	}
 
 	gitDir := repoDir + "/repo.git"
 
 	if b.opts.DryRun {
-		b.log.Info("  [DRY RUN] Would clone %s", repo.Slug)
+		b.log.Info("[worker-%d] [DRY RUN] Would clone %s", workerID, repo.Slug)
 		return nil
 	}
 
 	gitUser, gitPass := b.cfg.GetGitCredentials()
 	authURL := git.AuthenticatedURL(cloneURL, gitUser, gitPass)
 
+	// Log git credentials being used (mask password)
+	maskedPass := "***"
+	if len(gitPass) > 4 {
+		maskedPass = gitPass[:4] + "***"
+	}
+	b.log.Debug("[worker-%d] Git auth: user=%q, pass=%s, method=%s", workerID, gitUser, maskedPass, b.cfg.Auth.Method)
+
 	fullGitPath := b.storage.BasePath() + "/" + gitDir
+
+	// Create a log function that includes the worker ID prefix
+	gitLogFunc := func(msg string, args ...interface{}) {
+		b.log.Debug("[worker-%d] "+msg, append([]interface{}{workerID}, args...)...)
+	}
+
+	// Create a context with timeout for git operations
+	timeout := time.Duration(b.cfg.Backup.GitTimeoutMinutes) * time.Minute
+	if timeout <= 0 {
+		timeout = 30 * time.Minute // Default to 30 minutes
+	}
+	gitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	if _, err := os.Stat(fullGitPath); os.IsNotExist(err) {
-		b.log.Debug("  Cloning %s (mirror)", repo.Slug)
-		if err := git.CloneMirror(ctx, authURL, fullGitPath); err != nil {
+		if err := git.CloneMirrorWithLog(gitCtx, authURL, fullGitPath, gitLogFunc); err != nil {
+			if gitCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("git clone timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
+			}
 			return err
 		}
 	} else {
-		b.log.Debug("  Fetching updates for %s", repo.Slug)
-		if err := git.Fetch(ctx, fullGitPath); err != nil {
+		if err := git.FetchWithLog(gitCtx, fullGitPath, gitLogFunc); err != nil {
+			if gitCtx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("git fetch timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
+			}
 			return err
 		}
 	}
