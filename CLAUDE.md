@@ -80,6 +80,9 @@ make clean
 - State file (`.bb-backup-state.json`) tracks last backup for incremental support
 - Worker pool enables parallel git operations
 - Filter supports glob patterns for include/exclude
+- Single-repo mode (`--repo`) fetches directly via API (optimized)
+- Git operations have configurable timeout (`git_timeout_minutes`)
+- API tokens: email for API calls, username for git operations
 
 ## Common Tasks
 
@@ -99,6 +102,12 @@ make clean
 
 ```bash
 bb-backup backup --dry-run -w your-workspace
+```
+
+### Testing single-repo backup
+
+```bash
+bb-backup backup --repo my-repo-name -w your-workspace
 ```
 
 ### Verifying a backup

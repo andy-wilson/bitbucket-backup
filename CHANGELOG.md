@@ -9,11 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Single Repository Backup
+- New `--repo` flag to backup a single repository by name
+- Optimized to fetch repository directly via API (1 call vs paginated list)
+- Useful for testing and targeted backups
+
+#### Git Operation Timeout
+- New `git_timeout_minutes` config option (default: 30 minutes)
+- Prevents indefinite hangs on large repository clones
+- Context-based timeout with proper cancellation
+
+#### Enhanced Logging
+- Git auth debug logging shows credentials being used (password masked)
+- Extensive debug logging throughout backup process
+- Log flushing after each write ensures logs hit disk immediately
+- Timestamped log filenames to preserve history across runs
+
 #### API Token Authentication
 - Support for Bitbucket API tokens (`api_token` auth method)
 - Support for Repository/Project/Workspace access tokens (`access_token` auth method)
-- Automatic credential handling: username for API, email for git operations
 - Backward compatibility with deprecated app passwords
+
+### Fixed
+
+#### API Token Credentials
+- Fixed API token auth: email for API calls, username for git operations
+- Previously had these reversed, causing authentication failures
 
 ## [0.4.0] - 2025-12-19
 

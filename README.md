@@ -96,6 +96,7 @@ bb-backup backup [flags]
 | `--json-progress` | Output progress as JSON lines for automation |
 | `--include "pattern"` | Only include repos matching glob pattern |
 | `--exclude "pattern"` | Exclude repos matching glob pattern |
+| `--repo "name"` | Backup only a single repository (optimized) |
 | `--username` | Bitbucket username |
 | `--app-password` | Bitbucket app password |
 
@@ -119,6 +120,9 @@ bb-backup backup --incremental
 
 # Filter repositories
 bb-backup backup --include "core-*" --exclude "test-*"
+
+# Backup a single repository (optimized - skips fetching all repos)
+bb-backup backup --repo my-repo-name
 
 # Parallel backup with progress
 bb-backup backup --parallel 8 --json-progress
@@ -243,16 +247,16 @@ API tokens are the recommended authentication method as Bitbucket is deprecating
 ```yaml
 auth:
   method: "api_token"
-  username: "your-username"        # Bitbucket username (for API calls)
-  email: "your-email@example.com"  # Email address (for git operations)
+  username: "your-username"        # Bitbucket username (for git operations)
+  email: "your-email@example.com"  # Email address (for API calls)
   api_token: "${BITBUCKET_API_TOKEN}"
 ```
 
 Create an API token at: https://bitbucket.org/account/settings/api-tokens/
 
 **Important:** API tokens require:
-- Your **username** for API calls
-- Your **email** for git clone/fetch operations
+- Your **email** for API calls
+- Your **username** for git clone/fetch operations
 
 #### Access Token (Repository/Project/Workspace)
 
@@ -310,9 +314,11 @@ backup:
   include_issue_comments: true
   exclude_repos: []
   include_repos: []
+  git_timeout_minutes: 30  # Timeout for git clone/fetch (default: 30)
 
 logging:
   level: "info"
+  file: ""  # Optional: log to file (timestamped automatically)
 ```
 
 See [configs/example.yaml](configs/example.yaml) for a fully documented example.

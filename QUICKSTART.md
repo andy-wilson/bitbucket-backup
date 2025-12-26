@@ -71,8 +71,8 @@ export BITBUCKET_API_TOKEN="your-api-token"
 ```
 
 **Important:** API tokens require:
-- Your **username** for API calls
-- Your **email** for git clone/fetch operations
+- Your **email** for API calls
+- Your **username** for git clone/fetch operations
 
 To make these permanent, add them to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
@@ -177,6 +177,9 @@ bb-backup backup --include "core-*"
 
 # Exclude test repos
 bb-backup backup --exclude "test-*" --exclude "archive-*"
+
+# Backup a single repository (optimized - fetches only that repo)
+bb-backup backup --repo my-repo-name
 ```
 
 ### Incremental backup (after first run)
@@ -274,15 +277,17 @@ Bitbucket limits API requests to ~1000/hour. For large workspaces:
 ### "authentication failed"
 
 - Verify your API token has the required scopes
-- Check that `BITBUCKET_USERNAME` is your Bitbucket username (not email)
-- For API tokens, ensure `BITBUCKET_EMAIL` is set for git operations
+- For API tokens, ensure `BITBUCKET_EMAIL` is set (used for API calls)
+- For API tokens, ensure `BITBUCKET_USERNAME` is your Bitbucket username (used for git operations)
 - Ensure the token hasn't expired (API tokens have max 1 year expiry)
+- Run with `-v` to see debug output including auth details
 
 ### "git clone failed"
 
 - Ensure `git` is installed: `git --version`
 - Check you have read access to the repository
-- For large repos, increase timeout in config
+- For large repos, increase timeout: `git_timeout_minutes: 60` in config
+- Check the debug log for git auth details (user and masked password)
 
 ### Checking backup integrity
 
