@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/api"
-	"github.com/andy-wilson/bb-backup/internal/git"
 )
 
 // repoJob represents a repository backup job.
@@ -266,7 +265,7 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 	return nil
 }
 
-// backupGitRepo clones or fetches the git repository.
+// backupGitRepo clones or fetches the git repository using go-git.
 func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository, workerID int) error {
 	cloneURL := repo.CloneURL()
 	if cloneURL == "" {
@@ -281,10 +280,8 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 		return nil
 	}
 
-	gitUser, gitPass := b.cfg.GetGitCredentials()
-	authURL := git.AuthenticatedURL(cloneURL, gitUser, gitPass)
-
 	// Log git credentials being used (mask password)
+	gitUser, gitPass := b.cfg.GetGitCredentials()
 	maskedPass := "***"
 	if len(gitPass) > 4 {
 		maskedPass = gitPass[:4] + "***"
@@ -292,11 +289,6 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	b.log.Debug("[worker-%d] Git auth: user=%q, pass=%s, method=%s", workerID, gitUser, maskedPass, b.cfg.Auth.Method)
 
 	fullGitPath := b.storage.BasePath() + "/" + gitDir
-
-	// Create a log function that includes the worker ID prefix
-	gitLogFunc := func(msg string, args ...interface{}) {
-		b.log.Debug("[worker-%d] "+msg, append([]interface{}{workerID}, args...)...)
-	}
 
 	// Create a context with timeout for git operations
 	timeout := time.Duration(b.cfg.Backup.GitTimeoutMinutes) * time.Minute
@@ -306,15 +298,18 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	gitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Use go-git for clone/fetch operations
 	if _, err := os.Stat(fullGitPath); os.IsNotExist(err) {
-		if err := git.CloneMirrorWithLog(gitCtx, authURL, fullGitPath, gitLogFunc); err != nil {
+		b.log.Debug("[worker-%d] Cloning %s (mirror, go-git)", workerID, repo.Slug)
+		if err := b.gitClient.CloneMirror(gitCtx, cloneURL, fullGitPath); err != nil {
 			if gitCtx.Err() == context.DeadlineExceeded {
 				return fmt.Errorf("git clone timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
 			}
 			return err
 		}
 	} else {
-		if err := git.FetchWithLog(gitCtx, fullGitPath, gitLogFunc); err != nil {
+		b.log.Debug("[worker-%d] Fetching updates for %s (go-git)", workerID, repo.Slug)
+		if err := b.gitClient.Fetch(gitCtx, fullGitPath); err != nil {
 			if gitCtx.Err() == context.DeadlineExceeded {
 				return fmt.Errorf("git fetch timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
 			}

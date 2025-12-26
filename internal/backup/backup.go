@@ -11,6 +11,7 @@ import (
 
 	"github.com/andy-wilson/bb-backup/internal/api"
 	"github.com/andy-wilson/bb-backup/internal/config"
+	"github.com/andy-wilson/bb-backup/internal/git"
 	"github.com/andy-wilson/bb-backup/internal/storage"
 )
 
@@ -27,14 +28,15 @@ type Options struct {
 
 // Backup orchestrates the backup process.
 type Backup struct {
-	cfg      *config.Config
-	opts     Options
-	client   *api.Client
-	storage  storage.Storage
-	log      Logger
-	state    *State
-	filter   *RepoFilter
-	progress *Progress
+	cfg       *config.Config
+	opts      Options
+	client    *api.Client
+	storage   storage.Storage
+	log       Logger
+	state     *State
+	filter    *RepoFilter
+	progress  *Progress
+	gitClient *git.GoGitClient
 }
 
 // Logger interface for backup logging.
@@ -116,14 +118,23 @@ func New(cfg *config.Config, opts Options) (*Backup, error) {
 	// Create repo filter with logging
 	filter := NewRepoFilterWithLog(cfg.Backup.IncludeRepos, cfg.Backup.ExcludeRepos, log.Debug)
 
+	// Create go-git client with credentials and rate limiting
+	gitUser, gitPass := cfg.GetGitCredentials()
+	gitClient := git.NewGoGitClient(
+		git.WithCredentials(gitUser, gitPass),
+		git.WithLogger(log.Debug),
+		git.WithRateLimit(client.RateLimiter().Wait),
+	)
+
 	return &Backup{
-		cfg:     cfg,
-		opts:    opts,
-		client:  client,
-		storage: store,
-		log:     log,
-		state:   state,
-		filter:  filter,
+		cfg:       cfg,
+		opts:      opts,
+		client:    client,
+		storage:   store,
+		log:       log,
+		state:     state,
+		filter:    filter,
+		gitClient: gitClient,
 	}, nil
 }
 

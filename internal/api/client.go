@@ -101,6 +101,12 @@ func NewClient(cfg *config.Config, opts ...ClientOption) *Client {
 	return c
 }
 
+// RateLimiter returns the rate limiter for this client.
+// This allows other components to share the same rate limiting.
+func (c *Client) RateLimiter() *RateLimiter {
+	return c.rateLimiter
+}
+
 // PaginatedResponse represents a paginated API response.
 type PaginatedResponse struct {
 	Size     int             `json:"size"`
