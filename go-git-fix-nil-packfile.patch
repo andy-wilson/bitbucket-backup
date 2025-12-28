@@ -1,0 +1,37 @@
+--- a/storage/filesystem/object.go
++++ b/storage/filesystem/object.go
+@@ -2,6 +2,7 @@ package filesystem
+ 
+ import (
+ 	"bytes"
++	"errors"
+ 	"io"
+ 	"os"
+ 	"sync"
+@@ -479,10 +480,16 @@ func (s *ObjectStorage) getFromPackfile(h plumbing.Hash, canBeDelta bool) (
+ 	return s.decodeObjectAt(p, offset)
+ }
+ 
++// errNilPackfile is returned when a packfile pointer is unexpectedly nil.
++var errNilPackfile = errors.New("packfile is nil")
++
+ func (s *ObjectStorage) decodeObjectAt(
+ 	p *packfile.Packfile,
+ 	offset int64,
+ ) (plumbing.EncodedObject, error) {
++	if p == nil {
++		return nil, errNilPackfile
++	}
+ 	hash, err := p.FindHash(offset)
+ 	if err == nil {
+ 		obj, ok := s.objectCache.Get(hash)
+@@ -503,6 +510,9 @@ func (s *ObjectStorage) decodeDeltaObjectAt(
+ 	offset int64,
+ 	hash plumbing.Hash,
+ ) (plumbing.EncodedObject, error) {
++	if p == nil {
++		return nil, errNilPackfile
++	}
+ 	scan := p.Scanner()
+ 	header, err := scan.SeekObjectHeader(offset)
+ 	if err != nil {

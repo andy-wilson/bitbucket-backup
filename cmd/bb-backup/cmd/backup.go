@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -20,9 +21,11 @@ var (
 	incrementalOnly bool
 	dryRun          bool
 	parallel        int
+	maxRetry        int
 	username        string
 	appPassword     string
 	jsonProgress    bool
+	interactive     bool
 	excludeRepos    []string
 	includeRepos    []string
 	singleRepo      string
@@ -46,6 +49,7 @@ Backup modes:
   (default)      Auto-detect: incremental if state exists, full otherwise
 
 Progress output:
+  --interactive    Interactive mode with progress bar and ETA
   --json-progress  Output progress as JSON lines (for automation)
   --quiet          Suppress progress output
   --verbose        Show detailed debug output
@@ -76,9 +80,11 @@ func init() {
 	backupCmd.Flags().BoolVar(&incrementalOnly, "incremental", false, "force incremental (fail if no state)")
 	backupCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be backed up")
 	backupCmd.Flags().IntVar(&parallel, "parallel", 0, "parallel repo operations (overrides config)")
+	backupCmd.Flags().IntVar(&maxRetry, "retry", 0, "max retry attempts for failed repos (default 0)")
 	backupCmd.Flags().StringVar(&username, "username", "", "Bitbucket username")
 	backupCmd.Flags().StringVar(&appPassword, "app-password", "", "Bitbucket app password")
 	backupCmd.Flags().BoolVar(&jsonProgress, "json-progress", false, "output progress as JSON lines")
+	backupCmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "interactive mode with progress bar and ETA")
 	backupCmd.Flags().StringArrayVar(&excludeRepos, "exclude", nil, "exclude repos matching glob pattern")
 	backupCmd.Flags().StringArrayVar(&includeRepos, "include", nil, "only include repos matching glob pattern")
 	backupCmd.Flags().StringVar(&singleRepo, "repo", "", "backup only a single repository (for testing)")
@@ -118,11 +124,18 @@ func runBackup(_ *cobra.Command, _ []string) error {
 	}
 
 	// Create logger
+	// In interactive mode, suppress console output (logs go to file only)
+	logFile := cfg.Logging.File
+	if interactive && logFile == "" {
+		// Auto-create log file in storage directory for interactive mode
+		logFile = filepath.Join(cfg.Storage.Path, "bb-backup.log")
+	}
+	consoleOutput := logFile != "" && !interactive
 	log, err := logging.New(logging.Config{
 		Level:   effectiveLevel,
 		Format:  cfg.Logging.Format,
-		File:    cfg.Logging.File,
-		Console: cfg.Logging.File != "", // Also write to console if file logging enabled
+		File:    logFile,
+		Console: consoleOutput,
 	})
 	if err != nil {
 		return fmt.Errorf("initializing logger: %w", err)
@@ -137,6 +150,8 @@ func runBackup(_ *cobra.Command, _ []string) error {
 		Verbose:      log.IsDebug(),
 		Quiet:        log.IsQuiet(),
 		JSONProgress: jsonProgress,
+		Interactive:  interactive,
+		MaxRetry:     maxRetry,
 		Logger:       log,
 	}
 

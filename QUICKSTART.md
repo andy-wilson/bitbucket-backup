@@ -4,8 +4,8 @@ This guide will help you get started with `bb-backup` in under 5 minutes.
 
 ## Prerequisites
 
-- `git` CLI installed and in your PATH
 - A Bitbucket Cloud account with workspace access
+- No external dependencies required (uses pure Go git implementation)
 
 ## Step 1: Install bb-backup
 
@@ -210,6 +210,41 @@ bb-backup backup --json-progress
 bb-backup backup --parallel 8
 ```
 
+### Interactive mode (progress bar with ETA)
+
+```bash
+bb-backup backup -i
+```
+
+This shows a visual progress bar with elapsed time, ETA, and current repository.
+
+### Retry failed repositories
+
+```bash
+# After a backup with failures, retry just the failed ones
+bb-backup retry-failed
+
+# Clear the failed list without retrying
+bb-backup retry-failed --clear
+```
+
+## Restoring from Backup
+
+Repositories are stored as bare git mirrors. To restore:
+
+```bash
+# Clone from backup to a working directory
+git clone /backups/workspace/projects/PROJ/repositories/my-repo/repo.git my-repo
+
+# Or push to a new remote
+cd my-repo
+git remote set-url origin https://github.com/org/my-repo.git
+git push --all origin
+git push --tags origin
+```
+
+See the [README](README.md#restoring-from-backup) for more restore options.
+
 ## Setting Up Scheduled Backups
 
 ### Using cron (Linux/macOS)
@@ -284,10 +319,10 @@ Bitbucket limits API requests to ~1000/hour. For large workspaces:
 
 ### "git clone failed"
 
-- Ensure `git` is installed: `git --version`
 - Check you have read access to the repository
 - For large repos, increase timeout: `git_timeout_minutes: 60` in config
 - Check the debug log for git auth details (user and masked password)
+- Some repos may fail due to go-git issues; use `retry-failed` to retry them
 
 ### Checking backup integrity
 

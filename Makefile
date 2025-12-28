@@ -18,6 +18,9 @@ COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME?=$(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS=-ldflags "-X github.com/andy-wilson/bb-backup/cmd/bb-backup/cmd.version=$(VERSION) -X github.com/andy-wilson/bb-backup/cmd/bb-backup/cmd.commit=$(COMMIT) -X github.com/andy-wilson/bb-backup/cmd/bb-backup/cmd.buildTime=$(BUILD_TIME)"
 
+# Module flags (empty by default, can override for vendor mode)
+MODFLAGS=
+
 # Platforms for cross-compilation
 PLATFORMS=linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
 
@@ -26,27 +29,27 @@ all: lint test build
 
 ## build: Build the binary for current platform
 build:
-	$(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/bb-backup
+	$(GOBUILD) $(MODFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/bb-backup
 
 ## build-all: Build binaries for all supported platforms
 build-all:
 	@for platform in $(PLATFORMS); do \
 		GOOS=$${platform%/*} GOARCH=$${platform#*/} \
-		$(GOBUILD) $(LDFLAGS) -o bin/$(BINARY_NAME)-$${platform%/*}-$${platform#*/} ./cmd/bb-backup; \
+		$(GOBUILD) $(MODFLAGS) $(LDFLAGS) -o bin/$(BINARY_NAME)-$${platform%/*}-$${platform#*/} ./cmd/bb-backup; \
 	done
 
 ## test: Run all tests
 test:
-	$(GOTEST) -v -race -cover ./...
+	$(GOTEST) $(MODFLAGS) -v -race -cover ./...
 
 ## test-coverage: Run tests with coverage report
 test-coverage:
-	$(GOTEST) -v -race -coverprofile=coverage.out ./...
+	$(GOTEST) $(MODFLAGS) -v -race -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
 ## lint: Run linters
 lint:
-	$(GOVET) ./...
+	$(GOVET) $(MODFLAGS) ./...
 	$(GOFMT) -s -w .
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		golangci-lint run; \
@@ -61,7 +64,7 @@ clean:
 
 ## install: Install the binary to GOPATH/bin
 install:
-	$(GOBUILD) $(LDFLAGS) -o $(GOPATH)/bin/$(BINARY_NAME) ./cmd/bb-backup
+	$(GOBUILD) $(MODFLAGS) $(LDFLAGS) -o $(GOPATH)/bin/$(BINARY_NAME) ./cmd/bb-backup
 
 ## deps: Download dependencies
 deps:
@@ -74,7 +77,7 @@ fmt:
 
 ## vet: Run go vet
 vet:
-	$(GOVET) ./...
+	$(GOVET) $(MODFLAGS) ./...
 
 ## run: Run the application (for development)
 run:

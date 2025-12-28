@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/config"
@@ -144,7 +145,14 @@ func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 // GetPaginated fetches all pages of a paginated endpoint and returns all values.
 func (c *Client) GetPaginated(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var allValues []json.RawMessage
-	currentURL := c.baseURL + path
+
+	// Add pagelen parameter to get more items per page
+	// Using 50 as some endpoints (like pullrequests) have lower max than 100
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	currentURL := c.baseURL + path + separator + "pagelen=50"
 	page := 0
 
 	for currentURL != "" {

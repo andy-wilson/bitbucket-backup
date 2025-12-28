@@ -4,6 +4,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -123,9 +124,7 @@ func (c *GoGitClient) getAuth() transport.AuthMethod {
 
 // progressWriter wraps progress reporting.
 type progressWriter struct {
-	logFunc      LogFunc
-	progressFunc ProgressCallback
-	stage        string
+	logFunc LogFunc
 }
 
 func (w *progressWriter) Write(p []byte) (n int, err error) {
@@ -236,7 +235,7 @@ func (c *GoGitClient) Fetch(ctx context.Context, repoPath string) error {
 				"+refs/*:refs/*",
 			},
 		})
-		if err != nil && err != git.NoErrAlreadyUpToDate {
+		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return fmt.Errorf("fetching from %s: %w", remote.Config().Name, err)
 		}
 	}
@@ -258,7 +257,7 @@ func (c *GoGitClient) Fetch(ctx context.Context, repoPath string) error {
 }
 
 // Fsck verifies repository integrity using go-git.
-func (c *GoGitClient) Fsck(ctx context.Context, repoPath string) error {
+func (c *GoGitClient) Fsck(_ context.Context, repoPath string) error {
 	// Open the existing repository
 	fs := osfs.New(repoPath)
 	storage := filesystem.NewStorage(fs, nil)
@@ -275,7 +274,7 @@ func (c *GoGitClient) Fsck(ctx context.Context, repoPath string) error {
 	}
 
 	count := 0
-	err = objIter.ForEach(func(obj plumbing.EncodedObject) error {
+	err = objIter.ForEach(func(_ plumbing.EncodedObject) error {
 		count++
 		return nil
 	})

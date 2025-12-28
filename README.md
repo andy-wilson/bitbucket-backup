@@ -5,14 +5,18 @@ A CLI tool to backup Bitbucket Cloud workspaces, including git repositories and 
 ## Features
 
 - **Full repository backup** - Mirror clones of all git repositories
+- **Pure Go implementation** - No external git CLI required (uses go-git)
 - **Metadata export** - Pull requests, comments, issues, approvals, activity
 - **Project hierarchy** - Preserves Bitbucket's project structure
 - **Rate limit aware** - Respects Bitbucket API limits with smart backoff
-- **Incremental backups** - Only fetch changes since last backup
+- **Incremental backups** - Only fetch PRs/issues changed since last backup
 - **Parallel processing** - Configurable worker pools for faster backups
 - **Repository filtering** - Include/exclude repos by glob patterns
-- **Progress reporting** - Real-time progress with JSON output option
+- **Interactive mode** - Progress bar with ETA and real-time status (`-i` flag)
+- **Progress reporting** - JSON output for automation (`--json-progress`)
 - **Backup verification** - Verify integrity with `git fsck` and JSON validation
+- **Graceful shutdown** - CTRL-C safely stops backup without losing progress
+- **Automatic retry** - Retry failed repos with exponential backoff
 - **Cross-platform** - Linux and macOS support
 
 ## Installation
@@ -38,7 +42,7 @@ make build
 ### Prerequisites
 
 - Go 1.21+ (for building from source)
-- `git` CLI installed and in PATH
+- No external dependencies required (uses pure Go git implementation)
 
 ## Quick Start
 
@@ -65,10 +69,11 @@ Usage:
   bb-backup [command] [flags]
 
 Commands:
-  backup      Run a backup of the workspace
-  list        List repos/projects that would be backed up
-  verify      Verify backup integrity
-  version     Print version info
+  backup        Run a backup of the workspace
+  list          List repos/projects that would be backed up
+  retry-failed  Retry backup for previously failed repos
+  verify        Verify backup integrity
+  version       Print version info
 
 Global Flags:
   -c, --config string      Config file (default: ./bb-backup.yaml)
@@ -93,6 +98,8 @@ bb-backup backup [flags]
 | `--incremental` | Force incremental (fail if no state exists) |
 | `--dry-run` | Show what would be backed up without doing it |
 | `--parallel N` | Number of parallel git workers (default: 4) |
+| `--retry N` | Max retry attempts for failed repos (default: 0) |
+| `-i, --interactive` | Interactive mode with progress bar and ETA |
 | `--json-progress` | Output progress as JSON lines for automation |
 | `--include "pattern"` | Only include repos matching glob pattern |
 | `--exclude "pattern"` | Exclude repos matching glob pattern |
@@ -123,6 +130,9 @@ bb-backup backup --include "core-*" --exclude "test-*"
 
 # Backup a single repository (optimized - skips fetching all repos)
 bb-backup backup --repo my-repo-name
+
+# Interactive mode with progress bar
+bb-backup backup -i
 
 # Parallel backup with progress
 bb-backup backup --parallel 8 --json-progress
@@ -158,6 +168,32 @@ bb-backup list -w my-workspace --json
 
 # Preview with filters
 bb-backup list --exclude "archive-*" --exclude "test-*"
+```
+
+### retry-failed
+
+Retry backup for repositories that failed in a previous run.
+
+```bash
+bb-backup retry-failed [flags]
+```
+
+**Flags:**
+| Flag | Description |
+|------|-------------|
+| `--retry N` | Max retry attempts per repo (default: 2) |
+| `--clear` | Clear failed repos list without retrying |
+
+**Examples:**
+```bash
+# Retry all failed repos
+bb-backup retry-failed -c config.yaml
+
+# Retry with more attempts
+bb-backup retry-failed --retry 5
+
+# Clear the failed list without retrying
+bb-backup retry-failed --clear
 ```
 
 ### verify
@@ -419,6 +455,87 @@ The state file (`.bb-backup-state.json`) tracks:
 - Last backup timestamps
 - Per-repository PR/issue update times
 - Project and repo UUIDs
+
+## Restoring from Backup
+
+Repositories are backed up as bare git mirror clones (`.git` format). This preserves all branches, tags, and history.
+
+### Restore a Single Repository
+
+```bash
+# Clone from the backup to create a working directory
+git clone /backups/my-workspace/projects/PROJ/repositories/my-repo/repo.git my-repo
+
+# Or clone as bare repository
+git clone --bare /backups/my-workspace/projects/PROJ/repositories/my-repo/repo.git my-repo.git
+```
+
+### Restore to a New Remote
+
+```bash
+# Clone from backup
+git clone /backups/my-workspace/projects/PROJ/repositories/my-repo/repo.git my-repo
+cd my-repo
+
+# Change the remote to point to a new location
+git remote set-url origin https://github.com/org/my-repo.git
+
+# Push all branches and tags
+git push --all origin
+git push --tags origin
+```
+
+### Restore All Repositories
+
+```bash
+#!/bin/bash
+# Script to restore all repos from a backup
+
+BACKUP_DIR="/backups/my-workspace"
+TARGET_DIR="/restored"
+
+# Find all repo.git directories and clone them
+find "$BACKUP_DIR" -name "repo.git" -type d | while read repo_path; do
+    # Extract repo name from path
+    repo_name=$(basename $(dirname "$repo_path"))
+    echo "Restoring $repo_name..."
+    git clone "$repo_path" "$TARGET_DIR/$repo_name"
+done
+```
+
+### View Backup Contents Without Cloning
+
+```bash
+# List all branches in a backup
+git --git-dir=/backups/.../repo.git branch -a
+
+# List all tags
+git --git-dir=/backups/.../repo.git tag
+
+# View commit log
+git --git-dir=/backups/.../repo.git log --oneline -20
+
+# Show a specific file from a commit
+git --git-dir=/backups/.../repo.git show HEAD:path/to/file.txt
+```
+
+### Restoring Metadata
+
+Metadata (PRs, issues, comments) is stored as JSON files alongside each repository:
+
+```bash
+# View PR metadata
+cat /backups/.../repositories/my-repo/pull-requests/123.json | jq .
+
+# View issue with comments
+cat /backups/.../repositories/my-repo/issues/45.json | jq .
+cat /backups/.../repositories/my-repo/issues/45/comments.json | jq .
+
+# List all PRs for a repo
+ls /backups/.../repositories/my-repo/pull-requests/*.json
+```
+
+**Note:** There is currently no automated restore command to push metadata back to Bitbucket. The JSON files serve as an archive for reference, compliance, or migration to other platforms.
 
 ## Development
 

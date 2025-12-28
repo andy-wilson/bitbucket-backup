@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Pre-scan Repository Stats
+- Shows "Processing N repos (X updates, Y new)" before starting backup
+- Progress display shows "updating: repo-name" or "cloning: repo-name"
+- Helps users understand backup scope at a glance
+
+#### Interactive Progress Bar Mode
+- New `--interactive` / `-i` flag for user-friendly progress display
+- Visual progress bar with Unicode block characters
+- Real-time elapsed time display
+- ETA countdown and expected completion timestamp
+- Current repository being processed
+- Cleaner output with debug logs going to file only
+
+#### Automatic Retry for Failed Repos
+- New `--retry N` flag to automatically retry failed repos (default: 0)
+- Configurable retry attempts with exponential backoff
+- Panic recovery prevents go-git crashes from stopping entire backup
+- Failed repos are tracked in state file for later retry
+
+#### Retry-Failed Command
+- New `retry-failed` command to retry previously failed repositories
+- Reads failed repos from state file
+- `--clear` flag to clear failed list without retrying
+- Integrates with existing backup infrastructure
+
+#### Pure Go Git Implementation
+- Replaced shell exec git operations with go-git library (pure Go)
+- No longer requires git CLI to be installed
+- ~1.7x faster clone operations compared to shell exec
+- Full rate limiting control over git HTTP requests
+- Integrated with API rate limiter for unified throttling
+
+#### Activity Spinner
+- Animated spinner shows during long operations (e.g., `bb-backup list`)
+- Updates dynamically with pagination progress ("Fetching repositories... page N, M items")
+- Only shown in interactive terminals (not in piped output or JSON mode)
+- Terminal detection via `IsTerminal()` helper
+
 #### Single Repository Backup
 - New `--repo` flag to backup a single repository by name
 - Optimized to fetch repository directly via API (1 call vs paginated list)
@@ -35,6 +73,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### API Token Credentials
 - Fixed API token auth: email for API calls, username for git operations
 - Previously had these reversed, causing authentication failures
+
+#### Incremental Backup for PRs and Issues
+- PRs and issues now use `UpdatedSince` API for truly incremental backups
+- Only fetches items modified since last backup (previously fetched all)
+- Significantly reduces API calls for incremental runs
+
+#### API Pagination Optimization
+- Added `pagelen=50` to paginated API requests (5x fewer requests)
+- Using 50 instead of 100 for compatibility with all endpoints (some have lower max)
+
+#### Graceful Shutdown
+- CTRL-C now properly exits within 5 seconds
+- Previously could hang indefinitely if workers were stuck in long operations
+- Added timeout-based force shutdown after graceful shutdown period
+
+#### Interrupted Repos Not Counted as Failed
+- Repos interrupted by CTRL-C are now tracked separately from failures
+- Interrupted repos are NOT added to the failed list in state file
+- Summary shows "X interrupted" separately from "Y failed"
+- Previously all interrupted repos were marked as failed
+
+#### Panic Stack Traces
+- Added full stack traces to panic logs for easier debugging
+- Helps identify root cause of go-git crashes
+
+#### go-git Packfile Fix
+- Uses forked go-git ([andy-wilson/go-git](https://github.com/andy-wilson/go-git)) with nil packfile fix
+- Fixes upstream go-git panic in `decodeObjectAt` and `decodeDeltaObjectAt`
+- Prevents "nil pointer dereference" crashes during clone when processing tags
+- Converts panic into a graceful error that allows backup to continue
 
 ## [0.4.0] - 2025-12-19
 

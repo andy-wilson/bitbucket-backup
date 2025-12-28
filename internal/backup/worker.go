@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/api"
@@ -12,8 +14,10 @@ import (
 
 // repoJob represents a repository backup job.
 type repoJob struct {
-	baseDir string
-	repo    *api.Repository
+	baseDir  string
+	repo     *api.Repository
+	attempt  int // Current attempt number (0-based)
+	maxRetry int // Maximum retry attempts
 }
 
 // repoResult represents the result of a repository backup.
@@ -31,19 +35,50 @@ type repoStats struct {
 
 // workerPool manages concurrent repository backup operations.
 type workerPool struct {
-	workers int
-	jobs    chan repoJob
-	results chan repoResult
-	wg      sync.WaitGroup
+	workers    int
+	jobs       chan repoJob
+	results    chan repoResult
+	wg         sync.WaitGroup
+	closeOnce  sync.Once
+	jobBuffer  int
+	resBuffer  int
+	maxRetry   int
+	// Instrumentation
+	jobsSubmitted  atomic.Int64
+	jobsProcessed  atomic.Int64
+	jobsRetried    atomic.Int64
+	resultsQueued  atomic.Int64
+	resultsRead    atomic.Int64
+	activeWorkers  atomic.Int64
+	lastActivity   atomic.Int64 // Unix timestamp of last activity
+	logFunc        func(msg string, args ...interface{})
 }
 
 // newWorkerPool creates a new worker pool with the specified number of workers.
-func newWorkerPool(workers int) *workerPool {
-	return &workerPool{
-		workers: workers,
-		jobs:    make(chan repoJob, workers*2),
-		results: make(chan repoResult, workers*2),
+func newWorkerPool(workers, totalJobs, maxRetry int, logFunc func(string, ...interface{})) *workerPool {
+	// Use larger buffers to prevent deadlock:
+	// - jobs buffer: enough for all jobs + potential retries
+	// - results buffer: enough for all results to be sent without blocking
+	jobBuffer := totalJobs + (totalJobs * maxRetry) // Account for potential retries
+	if jobBuffer < workers*2 {
+		jobBuffer = workers * 2
 	}
+	resultBuffer := totalJobs
+	if resultBuffer < workers*2 {
+		resultBuffer = workers * 2
+	}
+
+	p := &workerPool{
+		workers:   workers,
+		jobs:      make(chan repoJob, jobBuffer),
+		results:   make(chan repoResult, resultBuffer),
+		jobBuffer: jobBuffer,
+		resBuffer: resultBuffer,
+		maxRetry:  maxRetry,
+		logFunc:   logFunc,
+	}
+	p.lastActivity.Store(time.Now().Unix())
+	return p
 }
 
 // start launches the worker goroutines.
@@ -57,35 +92,188 @@ func (p *workerPool) start(ctx context.Context, b *Backup) {
 
 // worker processes repository backup jobs.
 func (p *workerPool) worker(ctx context.Context, b *Backup, workerID int) {
-	defer p.wg.Done()
+	defer func() {
+		p.activeWorkers.Add(-1)
+		p.wg.Done()
+		b.log.Debug("[worker-%d] Shutdown (active workers: %d)", workerID, p.activeWorkers.Load())
+	}()
+
+	p.activeWorkers.Add(1)
+	b.log.Debug("[worker-%d] Started (active workers: %d)", workerID, p.activeWorkers.Load())
 
 	for job := range p.jobs {
-		select {
-		case <-ctx.Done():
-			p.results <- repoResult{
-				repo: job.repo,
-				err:  ctx.Err(),
-			}
-			continue
-		default:
+		p.processJob(ctx, b, workerID, job)
+	}
+}
+
+// processJob handles a single backup job with panic recovery and retry support.
+func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, job repoJob) {
+	p.jobsProcessed.Add(1)
+	p.lastActivity.Store(time.Now().Unix())
+
+	var jobErr error
+	var stats repoStats
+
+	// Recover from panics (e.g., go-git bugs) to prevent crashing the entire backup
+	defer func() {
+		if r := recover(); r != nil {
+			stack := string(debug.Stack())
+			jobErr = fmt.Errorf("panic recovered in worker: %v", r)
+			b.log.Error("[worker-%d] PANIC while processing %s (attempt %d): %v", workerID, job.repo.Slug, job.attempt+1, r)
+			b.log.Error("[worker-%d] Stack trace:\n%s", workerID, stack)
 		}
 
-		b.log.Debug("[worker-%d] Processing: %s", workerID, job.repo.Slug)
-		stats, err := b.backupRepositoryWorker(ctx, job.baseDir, job.repo, workerID)
-		if err == nil {
-			b.log.Debug("[worker-%d] Completed: %s", workerID, job.repo.Slug)
+		// Handle retry or send result
+		if jobErr != nil {
+			if p.shouldRetry(job, jobErr) {
+				p.requeueJob(b, workerID, job, jobErr)
+			} else {
+				p.sendResult(workerID, repoResult{repo: job.repo, err: jobErr})
+			}
 		}
-		p.results <- repoResult{
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Context cancelled - don't retry
+		p.sendResult(workerID, repoResult{
+			repo: job.repo,
+			err:  ctx.Err(),
+		})
+		return
+	default:
+	}
+
+	attemptStr := ""
+	if job.attempt > 0 {
+		attemptStr = fmt.Sprintf(" (retry %d/%d)", job.attempt, job.maxRetry)
+	}
+	b.log.Debug("[worker-%d] Processing: %s%s (jobs: %d/%d processed)",
+		workerID, job.repo.Slug, attemptStr, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
+
+	// Update progress with whether this is an update (fetch) or new clone
+	if b.progress != nil {
+		repoDir := job.baseDir + "/repositories/" + job.repo.Slug
+		gitDir := b.storage.BasePath() + "/" + repoDir + "/repo.git"
+		if _, err := os.Stat(gitDir); err == nil {
+			b.progress.StartWithType(job.repo.Slug, "updating")
+		} else {
+			b.progress.StartWithType(job.repo.Slug, "cloning")
+		}
+	}
+
+	stats, jobErr = b.backupRepositoryWorker(ctx, job.baseDir, job.repo, workerID)
+
+	if jobErr == nil {
+		b.log.Debug("[worker-%d] Completed: %s%s", workerID, job.repo.Slug, attemptStr)
+		p.sendResult(workerID, repoResult{
 			repo:  job.repo,
 			stats: stats,
-			err:   err,
+			err:   nil,
+		})
+	} else {
+		b.log.Debug("[worker-%d] Failed: %s%s - %v", workerID, job.repo.Slug, attemptStr, jobErr)
+		// Defer will handle retry or final result
+	}
+}
+
+// shouldRetry returns true if the job should be retried.
+func (p *workerPool) shouldRetry(job repoJob, err error) bool {
+	// Don't retry context cancellation
+	if err == context.Canceled || err == context.DeadlineExceeded {
+		return false
+	}
+	return job.attempt < job.maxRetry
+}
+
+// requeueJob requeues a failed job for retry.
+func (p *workerPool) requeueJob(b *Backup, workerID int, job repoJob, err error) {
+	job.attempt++
+	p.jobsRetried.Add(1)
+	p.jobsSubmitted.Add(1) // Count retry as new submission
+
+	b.log.Info("[worker-%d] Retrying %s (attempt %d/%d) after error: %v",
+		workerID, job.repo.Slug, job.attempt+1, job.maxRetry+1, err)
+
+	// Brief delay before retry to avoid hammering on transient errors
+	time.Sleep(time.Duration(job.attempt) * 2 * time.Second)
+
+	// Requeue the job (non-blocking since buffer should have space)
+	select {
+	case p.jobs <- job:
+		p.lastActivity.Store(time.Now().Unix())
+	default:
+		// Buffer full - shouldn't happen with our sizing, but handle gracefully
+		b.log.Error("[worker-%d] Failed to requeue %s - job buffer full", workerID, job.repo.Slug)
+		p.sendResult(workerID, repoResult{repo: job.repo, err: err})
+	}
+}
+
+// sendResult sends a result to the results channel with instrumentation.
+func (p *workerPool) sendResult(workerID int, result repoResult) {
+	startWait := time.Now()
+
+	// Try non-blocking send first
+	select {
+	case p.results <- result:
+		p.resultsQueued.Add(1)
+		p.lastActivity.Store(time.Now().Unix())
+		return
+	default:
+		// Channel might be full, log and do blocking send
+		if p.logFunc != nil {
+			p.logFunc("[worker-%d] Results channel full (%d/%d), waiting...",
+				workerID, len(p.results), p.resBuffer)
+		}
+	}
+
+	// Blocking send with periodic logging
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case p.results <- result:
+			p.resultsQueued.Add(1)
+			p.lastActivity.Store(time.Now().Unix())
+			waited := time.Since(startWait)
+			if waited > time.Second {
+				if p.logFunc != nil {
+					p.logFunc("[worker-%d] Results channel unblocked after %s", workerID, waited.Round(time.Millisecond))
+				}
+			}
+			return
+		case <-ticker.C:
+			if p.logFunc != nil {
+				p.logFunc("[worker-%d] STALL: Waiting to send result for %s (results: %d/%d, read: %d)",
+					workerID, time.Since(startWait).Round(time.Second), len(p.results), p.resBuffer, p.resultsRead.Load())
+			}
 		}
 	}
 }
 
 // submit adds a job to the worker pool.
 func (p *workerPool) submit(job repoJob) {
+	p.jobsSubmitted.Add(1)
+	p.lastActivity.Store(time.Now().Unix())
 	p.jobs <- job
+}
+
+// markResultRead should be called when a result is read from the results channel.
+func (p *workerPool) markResultRead() {
+	p.resultsRead.Add(1)
+	p.lastActivity.Store(time.Now().Unix())
+}
+
+// stats returns current worker pool statistics.
+func (p *workerPool) stats() string {
+	return fmt.Sprintf("workers=%d/%d active, jobs=%d/%d processed, retries=%d, results=%d queued/%d read, channels: jobs=%d/%d results=%d/%d",
+		p.activeWorkers.Load(), p.workers,
+		p.jobsProcessed.Load(), p.jobsSubmitted.Load(),
+		p.jobsRetried.Load(),
+		p.resultsQueued.Load(), p.resultsRead.Load(),
+		len(p.jobs), p.jobBuffer,
+		len(p.results), p.resBuffer)
 }
 
 // close signals no more jobs will be submitted.
@@ -96,7 +284,14 @@ func (p *workerPool) close() {
 // wait waits for all workers to finish.
 func (p *workerPool) wait() {
 	p.wg.Wait()
-	close(p.results)
+	p.closeResults()
+}
+
+// closeResults closes the results channel (safe to call multiple times).
+func (p *workerPool) closeResults() {
+	p.closeOnce.Do(func() {
+		close(p.results)
+	})
 }
 
 // backupRepositoryWorker is a worker-friendly version of backupRepository.
@@ -140,22 +335,49 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 
 // backupPullRequestsWorker is a worker-friendly version that returns count.
 func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, repo *api.Repository, workerID int) (int, error) {
-	prs, err := b.client.GetAllPullRequests(ctx, b.cfg.Workspace, repo.Slug)
-	if err != nil {
-		return 0, err
+	var prs []api.PullRequest
+	var err error
+	var isIncremental bool
+
+	// Check if we can do incremental backup
+	lastPRUpdated := b.state.GetLastPRUpdated(repo.Slug)
+	if !b.opts.Full && lastPRUpdated != "" {
+		// Incremental: only fetch PRs updated since last backup
+		prs, err = b.client.GetPullRequestsUpdatedSince(ctx, b.cfg.Workspace, repo.Slug, lastPRUpdated)
+		isIncremental = true
+		if err != nil {
+			return 0, err
+		}
+		if len(prs) > 0 {
+			b.log.Debug("[worker-%d] Found %d updated pull requests for %s (since %s)", workerID, len(prs), repo.Slug, lastPRUpdated)
+		}
+	} else {
+		// Full backup: fetch all PRs
+		prs, err = b.client.GetAllPullRequests(ctx, b.cfg.Workspace, repo.Slug)
+		if err != nil {
+			return 0, err
+		}
+		if len(prs) > 0 {
+			b.log.Debug("[worker-%d] Found %d pull requests for %s", workerID, len(prs), repo.Slug)
+		}
 	}
 
 	if len(prs) == 0 {
 		return 0, nil
 	}
 
-	b.log.Debug("[worker-%d] Found %d pull requests for %s", workerID, len(prs), repo.Slug)
 	prDir := repoDir + "/pull-requests"
 	count := 0
+	var latestUpdated string
 
 	for _, pr := range prs {
 		if err := ctx.Err(); err != nil {
 			return count, err
+		}
+
+		// Track the latest updated_on timestamp
+		if pr.UpdatedOn > latestUpdated {
+			latestUpdated = pr.UpdatedOn
 		}
 
 		if b.opts.DryRun {
@@ -168,6 +390,14 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, r
 			continue
 		}
 		count++
+	}
+
+	// Update state with latest timestamp for next incremental backup
+	if latestUpdated != "" && !b.opts.DryRun {
+		b.state.SetRepoLastPRUpdated(repo.Slug, latestUpdated)
+	} else if !isIncremental && !b.opts.DryRun && len(prs) == 0 {
+		// First backup with no PRs - set timestamp to now
+		b.state.SetRepoLastPRUpdated(repo.Slug, time.Now().UTC().Format(time.RFC3339))
 	}
 
 	return count, nil
@@ -209,22 +439,53 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 
 // backupIssuesWorker is a worker-friendly version that returns count.
 func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *api.Repository, workerID int) (int, error) {
-	issues, err := b.client.GetIssues(ctx, b.cfg.Workspace, repo.Slug)
-	if err != nil {
-		return 0, err
+	var issues []api.Issue
+	var err error
+	var isIncremental bool
+
+	// Check if we can do incremental backup
+	lastIssueUpdated := b.state.GetLastIssueUpdated(repo.Slug)
+	if !b.opts.Full && lastIssueUpdated != "" {
+		// Incremental: only fetch issues updated since last backup
+		issues, err = b.client.GetIssuesUpdatedSince(ctx, b.cfg.Workspace, repo.Slug, lastIssueUpdated)
+		isIncremental = true
+		if err != nil {
+			return 0, err
+		}
+		if len(issues) > 0 {
+			b.log.Debug("[worker-%d] Found %d updated issues for %s (since %s)", workerID, len(issues), repo.Slug, lastIssueUpdated)
+		}
+	} else {
+		// Full backup: fetch all issues
+		issues, err = b.client.GetIssues(ctx, b.cfg.Workspace, repo.Slug)
+		if err != nil {
+			return 0, err
+		}
+		if len(issues) > 0 {
+			b.log.Debug("[worker-%d] Found %d issues for %s", workerID, len(issues), repo.Slug)
+		}
 	}
 
 	if len(issues) == 0 {
+		// If full backup with no issues, set timestamp to now for future incrementals
+		if !isIncremental && !b.opts.DryRun {
+			b.state.SetRepoLastIssueUpdated(repo.Slug, time.Now().UTC().Format(time.RFC3339))
+		}
 		return 0, nil
 	}
 
-	b.log.Debug("[worker-%d] Found %d issues for %s", workerID, len(issues), repo.Slug)
 	issueDir := repoDir + "/issues"
 	count := 0
+	var latestUpdated string
 
 	for _, issue := range issues {
 		if err := ctx.Err(); err != nil {
 			return count, err
+		}
+
+		// Track the latest updated_on timestamp
+		if issue.UpdatedOn > latestUpdated {
+			latestUpdated = issue.UpdatedOn
 		}
 
 		if b.opts.DryRun {
@@ -237,6 +498,11 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *a
 			continue
 		}
 		count++
+	}
+
+	// Update state with latest timestamp for next incremental backup
+	if latestUpdated != "" && !b.opts.DryRun {
+		b.state.SetRepoLastIssueUpdated(repo.Slug, latestUpdated)
 	}
 
 	return count, nil

@@ -19,6 +19,16 @@ type State struct {
 	LastIncremental string                  `json:"last_incremental,omitempty"`
 	Projects        map[string]ProjectState `json:"projects"`
 	Repositories    map[string]RepoState    `json:"repositories"`
+	FailedRepos     map[string]FailedRepo   `json:"failed_repos,omitempty"`
+}
+
+// FailedRepo tracks a repository that failed to backup.
+type FailedRepo struct {
+	Slug       string `json:"slug"`
+	ProjectKey string `json:"project_key,omitempty"`
+	Error      string `json:"error"`
+	FailedAt   string `json:"failed_at"`
+	Attempts   int    `json:"attempts"`
 }
 
 // ProjectState tracks the state of a project.
@@ -44,6 +54,7 @@ func NewState(workspace string) *State {
 		Workspace:    workspace,
 		Projects:     make(map[string]ProjectState),
 		Repositories: make(map[string]RepoState),
+		FailedRepos:  make(map[string]FailedRepo),
 	}
 }
 
@@ -170,4 +181,47 @@ func (s *State) IsNewRepo(slug string) bool {
 // GetStatePath returns the default state file path for a storage path.
 func GetStatePath(storagePath, workspace string) string {
 	return filepath.Join(storagePath, workspace, StateFileName)
+}
+
+// AddFailedRepo records a repository that failed to backup.
+func (s *State) AddFailedRepo(slug, projectKey, errMsg string, attempts int) {
+	if s.FailedRepos == nil {
+		s.FailedRepos = make(map[string]FailedRepo)
+	}
+	s.FailedRepos[slug] = FailedRepo{
+		Slug:       slug,
+		ProjectKey: projectKey,
+		Error:      errMsg,
+		FailedAt:   time.Now().UTC().Format(time.RFC3339),
+		Attempts:   attempts,
+	}
+}
+
+// RemoveFailedRepo removes a repository from the failed list (after successful backup).
+func (s *State) RemoveFailedRepo(slug string) {
+	if s.FailedRepos != nil {
+		delete(s.FailedRepos, slug)
+	}
+}
+
+// GetFailedRepos returns all failed repositories.
+func (s *State) GetFailedRepos() []FailedRepo {
+	if s.FailedRepos == nil {
+		return nil
+	}
+	repos := make([]FailedRepo, 0, len(s.FailedRepos))
+	for _, r := range s.FailedRepos {
+		repos = append(repos, r)
+	}
+	return repos
+}
+
+// HasFailedRepos returns true if there are any failed repositories.
+func (s *State) HasFailedRepos() bool {
+	return len(s.FailedRepos) > 0
+}
+
+// ClearFailedRepos removes all failed repositories from state.
+func (s *State) ClearFailedRepos() {
+	s.FailedRepos = make(map[string]FailedRepo)
 }

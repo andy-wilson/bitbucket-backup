@@ -12,6 +12,7 @@ import (
 	"github.com/andy-wilson/bb-backup/internal/backup"
 	"github.com/andy-wilson/bb-backup/internal/config"
 	"github.com/andy-wilson/bb-backup/internal/logging"
+	"github.com/andy-wilson/bb-backup/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -130,6 +131,23 @@ func runList(_ *cobra.Command, _ []string) error {
 		cancel()
 	}()
 
+	// Determine if we should show a spinner (interactive terminal, not JSON mode)
+	showSpinner := !listJSON && ui.IsTerminal(os.Stderr)
+
+	// Create spinner for activity indication
+	var spinner *ui.Spinner
+	if showSpinner {
+		spinner = ui.NewSpinner(ui.WithMessage("Fetching workspace data..."))
+		spinner.Start()
+	}
+
+	// Helper to stop spinner on error
+	stopSpinner := func() {
+		if spinner != nil {
+			spinner.Stop()
+		}
+	}
+
 	// Set up API client with logging and progress callbacks
 	var clientOpts []api.ClientOption
 	if log.IsDebug() {
@@ -140,18 +158,31 @@ func runList(_ *cobra.Command, _ []string) error {
 			}))
 		}
 	}
+
+	// Add progress callback for spinner updates
+	if showSpinner {
+		clientOpts = append(clientOpts, api.WithProgressFunc(func(page, items int) {
+			if spinner != nil {
+				spinner.UpdateMessage(fmt.Sprintf("Fetching repositories... (page %d, %d items)", page, items))
+			}
+		}))
+	}
 	client := api.NewClient(cfg, clientOpts...)
 
-	if !listJSON {
+	if !listJSON && !showSpinner {
 		log.Info("Fetching workspace data for %s...", cfg.Workspace)
 	}
 
 	// Fetch projects
+	if spinner != nil {
+		spinner.UpdateMessage("Fetching projects...")
+	}
 	if log.IsDebug() && !listJSON {
 		log.Debug("Fetching projects...")
 	}
 	projects, err := client.GetProjects(ctx, cfg.Workspace)
 	if err != nil {
+		stopSpinner()
 		return fmt.Errorf("fetching projects: %w", err)
 	}
 	if log.IsDebug() && !listJSON {
@@ -159,16 +190,23 @@ func runList(_ *cobra.Command, _ []string) error {
 	}
 
 	// Fetch all repositories
+	if spinner != nil {
+		spinner.UpdateMessage("Fetching repositories...")
+	}
 	if log.IsDebug() && !listJSON {
 		log.Debug("Fetching repositories (this may take a while)...")
 	}
 	allRepos, err := client.GetRepositories(ctx, cfg.Workspace)
 	if err != nil {
+		stopSpinner()
 		return fmt.Errorf("fetching repositories: %w", err)
 	}
 	if log.IsDebug() && !listJSON {
 		log.Debug("Found %d repositories", len(allRepos))
 	}
+
+	// Stop spinner before output
+	stopSpinner()
 
 	// Apply filters
 	filter := backup.NewRepoFilter(cfg.Backup.IncludeRepos, cfg.Backup.ExcludeRepos)

@@ -4,9 +4,11 @@ package backup
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/api"
@@ -23,6 +25,8 @@ type Options struct {
 	Verbose      bool
 	Quiet        bool
 	JSONProgress bool
+	Interactive  bool   // Interactive mode with progress bar
+	MaxRetry     int    // Maximum retry attempts for failed repos
 	Logger       Logger // Optional external logger
 }
 
@@ -143,6 +147,11 @@ func (b *Backup) Run(ctx context.Context) error {
 	startTime := time.Now()
 	b.log.Info("Starting backup for workspace: %s", b.cfg.Workspace)
 
+	// In interactive mode, print status to console since logs go to file only
+	if b.opts.Interactive {
+		fmt.Fprintf(os.Stderr, "Starting backup for workspace: %s\n", b.cfg.Workspace)
+	}
+
 	if b.opts.DryRun {
 		b.log.Info("DRY RUN - no changes will be made")
 	}
@@ -158,9 +167,15 @@ func (b *Backup) Run(ctx context.Context) error {
 
 	// Fetch workspace metadata
 	b.log.Info("Fetching workspace metadata...")
+	if b.opts.Interactive {
+		fmt.Fprint(os.Stderr, "Fetching workspace metadata... ")
+	}
 	workspace, err := b.client.GetWorkspace(ctx, b.cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching workspace: %w", err)
+	}
+	if b.opts.Interactive {
+		fmt.Fprintln(os.Stderr, "done")
 	}
 
 	if !b.opts.DryRun {
@@ -172,9 +187,15 @@ func (b *Backup) Run(ctx context.Context) error {
 
 	// Fetch projects
 	b.log.Info("Fetching projects...")
+	if b.opts.Interactive {
+		fmt.Fprint(os.Stderr, "Fetching projects... ")
+	}
 	projects, err := b.client.GetProjects(ctx, b.cfg.Workspace)
 	if err != nil {
 		return fmt.Errorf("fetching projects: %w", err)
+	}
+	if b.opts.Interactive {
+		fmt.Fprintf(os.Stderr, "found %d\n", len(projects))
 	}
 	b.log.Info("Found %d projects", len(projects))
 
@@ -184,14 +205,23 @@ func (b *Backup) Run(ctx context.Context) error {
 	// Check if we're backing up a single specific repository
 	if singleRepoSlug := b.filter.SingleRepoSlug(); singleRepoSlug != "" {
 		b.log.Info("Fetching single repository: %s", singleRepoSlug)
+		if b.opts.Interactive {
+			fmt.Fprintf(os.Stderr, "Fetching repository %s... ", singleRepoSlug)
+		}
 		repo, err := b.client.GetRepository(ctx, b.cfg.Workspace, singleRepoSlug)
 		if err != nil {
 			return fmt.Errorf("fetching repository %s: %w", singleRepoSlug, err)
 		}
 		repos = []api.Repository{*repo}
+		if b.opts.Interactive {
+			fmt.Fprintln(os.Stderr, "done")
+		}
 		b.log.Info("Found repository: %s", repo.Slug)
 	} else {
 		b.log.Info("Fetching repositories...")
+		if b.opts.Interactive {
+			fmt.Fprint(os.Stderr, "Fetching repositories... ")
+		}
 		allRepos, err := b.client.GetRepositories(ctx, b.cfg.Workspace)
 		if err != nil {
 			return fmt.Errorf("fetching repositories: %w", err)
@@ -201,14 +231,30 @@ func (b *Backup) Run(ctx context.Context) error {
 		repos = b.filter.Filter(allRepos)
 		included, excluded := b.filter.FilteredCount(allRepos)
 		if excluded > 0 {
+			if b.opts.Interactive {
+				fmt.Fprintf(os.Stderr, "found %d (%d excluded)\n", included, excluded)
+			}
 			b.log.Info("Found %d repositories (%d excluded by filters)", included, excluded)
 		} else {
+			if b.opts.Interactive {
+				fmt.Fprintf(os.Stderr, "found %d\n", len(repos))
+			}
 			b.log.Info("Found %d repositories", len(repos))
 		}
 	}
 
+	// Pre-scan to count existing vs new repos
+	existingCount, newCount := b.countExistingRepos(backupDir, repos, projects)
+
 	// Initialize progress tracker
-	b.progress = NewProgress(len(repos), b.opts.JSONProgress, b.opts.Quiet)
+	if b.opts.Interactive {
+		if existingCount > 0 {
+			fmt.Fprintf(os.Stderr, "\nProcessing %d repositories (%d updates, %d new)...\n", len(repos), existingCount, newCount)
+		} else {
+			fmt.Fprintf(os.Stderr, "\nProcessing %d repositories...\n", len(repos))
+		}
+	}
+	b.progress = NewProgress(len(repos), b.opts.JSONProgress, b.opts.Quiet, b.opts.Interactive)
 
 	// Track stats
 	stats := &backupStats{}
@@ -266,8 +312,13 @@ func (b *Backup) Run(ctx context.Context) error {
 	// Print summary
 	elapsed := time.Since(startTime)
 	b.log.Info("Backup completed in %s", elapsed.Round(time.Second))
-	b.log.Info("Stats: %d projects, %d repos, %d PRs, %d issues, %d failed",
-		stats.Projects, stats.Repos, stats.PullRequests, stats.Issues, stats.Failed)
+	if stats.Interrupted > 0 {
+		b.log.Info("Stats: %d projects, %d repos, %d PRs, %d issues, %d failed, %d interrupted",
+			stats.Projects, stats.Repos, stats.PullRequests, stats.Issues, stats.Failed, stats.Interrupted)
+	} else {
+		b.log.Info("Stats: %d projects, %d repos, %d PRs, %d issues, %d failed",
+			stats.Projects, stats.Repos, stats.PullRequests, stats.Issues, stats.Failed)
+	}
 
 	if b.progress != nil {
 		b.progress.Summary()
@@ -298,8 +349,9 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	if workers < 1 {
 		workers = 1
 	}
-	b.log.Debug("processRepositories: starting worker pool with %d workers", workers)
-	pool := newWorkerPool(workers)
+	totalJobs := len(repos)
+	b.log.Debug("processRepositories: starting worker pool with %d workers for %d jobs (max retry: %d)", workers, totalJobs, b.opts.MaxRetry)
+	pool := newWorkerPool(workers, totalJobs, b.opts.MaxRetry, b.log.Debug)
 	pool.start(ctx, b)
 
 	// Submit jobs for project repos
@@ -309,8 +361,9 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 		for _, repo := range reposByProject[project.Key] {
 			b.log.Debug("processRepositories: submitting job for %s (project: %s)", repo.Slug, project.Key)
 			pool.submit(repoJob{
-				baseDir: projectDir,
-				repo:    &repo,
+				baseDir:  projectDir,
+				repo:     &repo,
+				maxRetry: b.opts.MaxRetry,
 			})
 			jobCount++
 		}
@@ -321,8 +374,9 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	for _, repo := range personalRepos {
 		b.log.Debug("processRepositories: submitting job for %s (personal)", repo.Slug)
 		pool.submit(repoJob{
-			baseDir: personalDir,
-			repo:    &repo,
+			baseDir:  personalDir,
+			repo:     &repo,
+			maxRetry: b.opts.MaxRetry,
 		})
 		jobCount++
 	}
@@ -331,17 +385,52 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	// Close jobs channel and collect results
 	pool.close()
 
+	// Start periodic stats logging
+	statsCtx, statsCancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-statsCtx.Done():
+				return
+			case <-ticker.C:
+				b.log.Debug("processRepositories: pool stats - %s", pool.stats())
+			}
+		}
+	}()
+
 	// Collect results in a separate goroutine
 	b.log.Debug("processRepositories: starting result collector")
 	done := make(chan struct{})
 	resultCount := 0
 	go func() {
 		for result := range pool.results {
+			pool.markResultRead()
 			resultCount++
 			b.log.Debug("processRepositories: received result %d/%d for %s", resultCount, jobCount, result.repo.Slug)
 			if result.err != nil {
+				// Check if this was just an interrupt/cancellation (not a real failure)
+				if isContextCanceled(result.err) {
+					stats.Interrupted++
+					b.log.Debug("Backup interrupted for repo %s", result.repo.Slug)
+					if b.progress != nil {
+						b.progress.Interrupt(result.repo.Slug)
+					}
+					// Don't add to failed list - just incomplete, not failed
+					continue
+				}
+
 				b.log.Error("Failed to backup repo %s: %v", result.repo.Slug, result.err)
 				stats.Failed++
+
+				// Track failed repo in state
+				projectKey := ""
+				if result.repo.Project != nil {
+					projectKey = result.repo.Project.Key
+				}
+				b.state.AddFailedRepo(result.repo.Slug, projectKey, result.err.Error(), b.opts.MaxRetry+1)
+
 				if b.progress != nil {
 					b.progress.Fail(result.repo.Slug, result.err)
 				}
@@ -350,12 +439,13 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 				stats.PullRequests += result.stats.PullRequests
 				stats.Issues += result.stats.Issues
 
-				// Update state
+				// Update state and remove from failed list if previously failed
 				projectKey := ""
 				if result.repo.Project != nil {
 					projectKey = result.repo.Project.Key
 				}
 				b.state.UpdateRepository(result.repo.Slug, result.repo.UUID, projectKey)
+				b.state.RemoveFailedRepo(result.repo.Slug) // Clear from failed list on success
 
 				if b.progress != nil {
 					b.progress.Complete(result.repo.Slug)
@@ -366,12 +456,44 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 		close(done)
 	}()
 
-	// Wait for workers to finish
+	// Wait for workers to finish (with timeout if context cancelled)
 	b.log.Debug("processRepositories: waiting for workers to finish...")
-	pool.wait()
-	b.log.Debug("processRepositories: workers finished, waiting for result collector...")
-	<-done
-	b.log.Debug("processRepositories: complete")
+
+	waitDone := make(chan struct{})
+	go func() {
+		pool.wait()
+		close(waitDone)
+	}()
+
+	// If context is cancelled, wait max 5 seconds for graceful shutdown
+	select {
+	case <-waitDone:
+		b.log.Debug("processRepositories: workers finished normally")
+	case <-ctx.Done():
+		b.log.Debug("processRepositories: context cancelled, waiting up to 5s for workers...")
+		select {
+		case <-waitDone:
+			b.log.Debug("processRepositories: workers finished after cancellation")
+		case <-time.After(5 * time.Second):
+			b.log.Debug("processRepositories: timeout waiting for workers, forcing shutdown")
+			// Force close results channel so result collector can exit
+			pool.closeResults()
+		}
+	}
+
+	b.log.Debug("processRepositories: waiting for result collector...")
+	// Give result collector a moment to finish
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		b.log.Debug("processRepositories: timeout waiting for result collector")
+	}
+
+	// Stop stats logging
+	statsCancel()
+
+	// Log final stats
+	b.log.Debug("processRepositories: complete - final stats: %s", pool.stats())
 
 	return nil
 }
@@ -429,6 +551,48 @@ type backupStats struct {
 	PullRequests int
 	Issues       int
 	Failed       int
+	Interrupted  int
+}
+
+// isContextCanceled checks if an error is due to context cancellation.
+func isContextCanceled(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for direct context errors
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// Check error message for wrapped context errors
+	errStr := err.Error()
+	return strings.Contains(errStr, "context canceled") ||
+		strings.Contains(errStr, "context deadline exceeded")
+}
+
+// countExistingRepos counts how many repos already have a backup (update) vs new.
+func (b *Backup) countExistingRepos(backupDir string, repos []api.Repository, projects []api.Project) (existing, new int) {
+	// Build project key lookup
+	projectByKey := make(map[string]*api.Project)
+	for i := range projects {
+		projectByKey[projects[i].Key] = &projects[i]
+	}
+
+	for _, repo := range repos {
+		var repoDir string
+		if repo.Project != nil {
+			repoDir = filepath.Join(backupDir, "projects", repo.Project.Key, "repositories", repo.Slug)
+		} else {
+			repoDir = filepath.Join(backupDir, "personal", "repositories", repo.Slug)
+		}
+		gitDir := filepath.Join(repoDir, "repo.git")
+
+		if _, err := os.Stat(gitDir); err == nil {
+			existing++
+		} else {
+			new++
+		}
+	}
+	return existing, new
 }
 
 // Manifest describes a backup.

@@ -27,7 +27,7 @@ This file provides context for Claude Code when working on this project.
 | `SPEC.md` | Full project specification with requirements and acceptance criteria |
 | `QUICKSTART.md` | Getting started guide |
 | `cmd/bb-backup/main.go` | CLI entrypoint |
-| `cmd/bb-backup/cmd/` | CLI commands (backup, list, verify, version) |
+| `cmd/bb-backup/cmd/` | CLI commands (backup, list, verify, retry-failed, version) |
 | `internal/api/` | Bitbucket API client with rate limiting |
 | `internal/api/client.go` | HTTP client with retry logic |
 | `internal/api/ratelimit.go` | Token bucket rate limiter |
@@ -41,7 +41,10 @@ This file provides context for Claude Code when working on this project.
 | `internal/backup/state.go` | State file for incremental backups |
 | `internal/config/` | Configuration handling |
 | `internal/git/` | Git operations (clone, fetch) |
+| `internal/git/gogit.go` | Pure Go git implementation using go-git |
 | `internal/storage/` | Storage backends (local filesystem) |
+| `internal/ui/` | Terminal UI components (spinner, progress bar) |
+| `internal/ui/progressbar.go` | Interactive progress bar with ETA |
 
 ## Build Commands
 
@@ -65,11 +68,12 @@ make clean
 ## Development Guidelines
 
 1. **Language**: Go 1.21+
-2. **Dependencies**: Keep minimal - prefer standard library
+2. **Dependencies**: Keep minimal - key deps: go-git (git), cobra (CLI), yaml.v3 (config)
 3. **Testing**: Unit tests with mocked API responses (no test workspace available)
 4. **Error handling**: Wrap errors with context using `fmt.Errorf("context: %w", err)`
 5. **Logging**: Use structured logging, never log credentials
 6. **Rate limiting**: Critical - Bitbucket limits to ~1000 req/hour
+7. **No external tools**: All functionality is pure Go (no shell exec)
 
 ## Architecture Notes
 
@@ -83,6 +87,14 @@ make clean
 - Single-repo mode (`--repo`) fetches directly via API (optimized)
 - Git operations have configurable timeout (`git_timeout_minutes`)
 - API tokens: email for API calls, username for git operations
+- Pure Go git via go-git library (no external git CLI needed)
+- Git HTTP transport integrated with API rate limiter
+- Activity spinner for long operations (terminal-only, auto-detected)
+- Interactive progress bar mode (`-i`) with ETA and visual progress
+- Incremental backup uses `UpdatedSince` API for PRs/issues (only fetches changes)
+- Graceful shutdown on CTRL-C with 5-second timeout
+- Interrupted repos tracked separately from failures (not added to retry list)
+- Panic recovery in workers with stack trace logging
 
 ## Common Tasks
 
