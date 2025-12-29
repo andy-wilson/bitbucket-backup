@@ -622,27 +622,41 @@ func isContextCanceled(err error) bool {
 }
 
 // countExistingRepos counts how many repos already have a backup (update) vs new.
-// Checks the latest directory for HEAD file to verify it's a valid git repo.
+// Checks the latest directory for a valid git repo.
 func (b *Backup) countExistingRepos(backupDir string, repos []api.Repository, projects []api.Project) (existing, newRepos int) {
 	basePath := b.storage.BasePath()
 
 	for _, repo := range repos {
 		// Check the latest directory for existing git repos
-		// Look for HEAD file to verify it's a valid git repo (not just an empty directory)
-		var headPath string
+		var gitPath string
 		if repo.Project != nil && repo.Project.Key != "" {
-			headPath = filepath.Join(basePath, b.cfg.Workspace, "latest", "projects", repo.Project.Key, "repositories", repo.Slug, "repo.git", "HEAD")
+			gitPath = filepath.Join(basePath, b.cfg.Workspace, "latest", "projects", repo.Project.Key, "repositories", repo.Slug, "repo.git")
 		} else {
-			headPath = filepath.Join(basePath, b.cfg.Workspace, "latest", "personal", "repositories", repo.Slug, "repo.git", "HEAD")
+			gitPath = filepath.Join(basePath, b.cfg.Workspace, "latest", "personal", "repositories", repo.Slug, "repo.git")
 		}
 
-		if _, err := os.Stat(headPath); err == nil {
+		if isValidGitRepo(gitPath) {
 			existing++
 		} else {
 			newRepos++
 		}
 	}
 	return existing, newRepos
+}
+
+// isValidGitRepo checks if a path contains a valid git repository.
+// Checks for HEAD file in both bare repo format (path/HEAD) and
+// go-git nested format (path/.git/HEAD).
+func isValidGitRepo(path string) bool {
+	// Check for bare repo format: path/HEAD
+	if _, err := os.Stat(path + "/HEAD"); err == nil {
+		return true
+	}
+	// Check for go-git nested format: path/.git/HEAD
+	if _, err := os.Stat(path + "/.git/HEAD"); err == nil {
+		return true
+	}
+	return false
 }
 
 // Manifest describes a backup.

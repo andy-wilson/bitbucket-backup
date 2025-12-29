@@ -171,10 +171,10 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 
 	// Update progress with whether this is an update (fetch) or new clone
 	// Check for HEAD file to verify it's a valid git repo (not just an empty directory)
+	// go-git creates repo.git/.git/HEAD, shell git creates repo.git/HEAD
 	if b.progress != nil && !b.shuttingDown.Load() {
 		latestGitPath := b.storage.BasePath() + "/" + b.getLatestGitPath(job.repo)
-		headPath := latestGitPath + "/HEAD"
-		if _, err := os.Stat(headPath); err == nil {
+		if isValidGitRepo(latestGitPath) {
 			b.progress.StartWithType(job.repo.Slug, "updating")
 		} else {
 			b.progress.StartWithType(job.repo.Slug, "cloning")
@@ -629,11 +629,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 
 	// Try go-git first, fall back to shell git if it fails
 	// Check for HEAD file to verify it's a valid git repo (not just an empty directory)
-	isClone := false
-	headPath := fullGitPath + "/HEAD"
-	if _, err := os.Stat(headPath); os.IsNotExist(err) {
-		isClone = true
-	}
+	isClone := !isValidGitRepo(fullGitPath)
 
 	var goGitErr error
 	if isClone {
@@ -719,3 +715,4 @@ func isGoGitRetryableError(err error) bool {
 	}
 	return false
 }
+
