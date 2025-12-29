@@ -454,6 +454,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 
 // savePR saves a single PR and its related data.
 func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.PullRequest) error {
+	workerID := api.GetWorkerID(ctx)
 	prFile := fmt.Sprintf("%d.json", pr.ID)
 	if err := b.saveJSON(prDir, prFile, pr); err != nil {
 		return err
@@ -465,11 +466,11 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 		comments, err := b.client.GetPullRequestComments(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
-				b.log.Error("  Failed to fetch comments for PR #%d: %v", pr.ID, err)
+				b.log.Error("[worker-%d] Failed to fetch comments for PR #%d: %v", workerID, pr.ID, err)
 			}
 		} else if len(comments) > 0 {
 			if err := b.saveJSON(prSubDir, "comments.json", comments); err != nil {
-				b.log.Error("  Failed to save comments for PR #%d: %v", pr.ID, err)
+				b.log.Error("[worker-%d] Failed to save comments for PR #%d: %v", workerID, pr.ID, err)
 			}
 		}
 	}
@@ -478,11 +479,11 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 		activity, err := b.client.GetPullRequestActivity(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
-				b.log.Error("  Failed to fetch activity for PR #%d: %v", pr.ID, err)
+				b.log.Error("[worker-%d] Failed to fetch activity for PR #%d: %v", workerID, pr.ID, err)
 			}
 		} else if len(activity) > 0 {
 			if err := b.saveJSON(prSubDir, "activity.json", activity); err != nil {
-				b.log.Error("  Failed to save activity for PR #%d: %v", pr.ID, err)
+				b.log.Error("[worker-%d] Failed to save activity for PR #%d: %v", workerID, pr.ID, err)
 			}
 		}
 	}
@@ -570,6 +571,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 
 // saveIssue saves a single issue and its related data.
 func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue *api.Issue) error {
+	workerID := api.GetWorkerID(ctx)
 	issueFile := fmt.Sprintf("%d.json", issue.ID)
 	if err := b.saveJSON(issueDir, issueFile, issue); err != nil {
 		return err
@@ -581,11 +583,11 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 		comments, err := b.client.GetIssueComments(ctx, b.cfg.Workspace, repoSlug, issue.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
-				b.log.Error("  Failed to fetch comments for issue #%d: %v", issue.ID, err)
+				b.log.Error("[worker-%d] Failed to fetch comments for issue #%d: %v", workerID, issue.ID, err)
 			}
 		} else if len(comments) > 0 {
 			if err := b.saveJSON(issueSubDir, "comments.json", comments); err != nil {
-				b.log.Error("  Failed to save comments for issue #%d: %v", issue.ID, err)
+				b.log.Error("[worker-%d] Failed to save comments for issue #%d: %v", workerID, issue.ID, err)
 			}
 		}
 	}
