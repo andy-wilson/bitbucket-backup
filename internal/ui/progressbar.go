@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// Spinner frames for activity indicator
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
 // ProgressBar displays an animated progress bar with ETA.
 type ProgressBar struct {
 	writer        io.Writer
@@ -26,6 +29,8 @@ type ProgressBar struct {
 	running       bool
 	avgDuration   time.Duration
 	completedList []time.Duration // Track individual completion times for ETA
+	spinnerIdx    int             // Current spinner frame
+	twoLineMode   bool            // Show current repo on separate line above progress bar
 }
 
 // ProgressBarOption configures a ProgressBar.
@@ -49,6 +54,13 @@ func WithBarWidth(width int) ProgressBarOption {
 func WithUpdateInterval(d time.Duration) ProgressBarOption {
 	return func(p *ProgressBar) {
 		p.interval = d
+	}
+}
+
+// WithTwoLineMode enables two-line display with current repo above the progress bar.
+func WithTwoLineMode() ProgressBarOption {
+	return func(p *ProgressBar) {
+		p.twoLineMode = true
 	}
 }
 
@@ -82,6 +94,11 @@ func (p *ProgressBar) Start() {
 	p.stop = make(chan struct{})
 	p.done = make(chan struct{})
 	p.mu.Unlock()
+
+	// In two-line mode, print initial empty line for the status line
+	if p.twoLineMode {
+		fmt.Fprintln(p.writer, "")
+	}
 
 	go p.run()
 }
@@ -164,6 +181,9 @@ func (p *ProgressBar) render() {
 	total := p.total
 	current := p.current
 	startTime := p.startTime
+	twoLineMode := p.twoLineMode
+	spinnerIdx := p.spinnerIdx
+	p.spinnerIdx = (p.spinnerIdx + 1) % len(spinnerFrames)
 	p.mu.Unlock()
 
 	elapsed := time.Since(startTime)
@@ -186,37 +206,66 @@ func (p *ProgressBar) render() {
 	// Build progress bar
 	bar := p.buildBar(percent)
 
-	// Build status line
-	// Format: [████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 25% (10/40) ⏱ 2m30s ETA: 7m30s (19:45:30)
-	statusLine := fmt.Sprintf("\r%s %.0f%% (%d/%d", bar, percent, processed, total)
-	if failed > 0 {
-		statusLine += fmt.Sprintf(", %d failed", failed)
-	}
-	statusLine += ")"
+	if twoLineMode {
+		// Two-line mode: status line above, progress bar below
+		// Move cursor up, clear line, write status, move down, clear line, write progress
 
-	// Runtime
-	statusLine += fmt.Sprintf(" ⏱ %s", formatDuration(elapsed))
-
-	// ETA
-	if eta > 0 {
-		statusLine += fmt.Sprintf(" ETA: %s (%s)", formatDuration(eta), etaTime.Format("15:04:05"))
-	} else if processed >= total && total > 0 {
-		statusLine += " ✓ Complete"
-	}
-
-	// Current item (truncated to fit)
-	if current != "" {
-		maxLen := 30
-		display := current
-		if len(display) > maxLen {
-			display = "..." + display[len(display)-maxLen+3:]
+		// Build status line with spinner and current repo
+		statusLine := ""
+		if current != "" {
+			spinner := spinnerFrames[spinnerIdx]
+			statusLine = fmt.Sprintf("%s %s", spinner, current)
+		} else if processed >= total && total > 0 {
+			statusLine = "✓ Complete"
+		} else {
+			statusLine = "Waiting..."
 		}
-		statusLine += fmt.Sprintf(" │ %s", display)
-	}
 
-	// Clear line and write
-	p.clearLine()
-	fmt.Fprint(p.writer, statusLine)
+		// Build progress line
+		progressLine := fmt.Sprintf("%s %.0f%% (%d/%d", bar, percent, processed, total)
+		if failed > 0 {
+			progressLine += fmt.Sprintf(", %d failed", failed)
+		}
+		progressLine += ")"
+		progressLine += fmt.Sprintf(" ⏱ %s", formatDuration(elapsed))
+		if eta > 0 {
+			progressLine += fmt.Sprintf(" ETA: %s (%s)", formatDuration(eta), etaTime.Format("15:04:05"))
+		}
+
+		// Move up, clear, write status, move down, clear, write progress
+		fmt.Fprintf(p.writer, "\033[F\033[K%s\n\033[K%s", statusLine, progressLine)
+	} else {
+		// Single-line mode (original behavior)
+		statusLine := fmt.Sprintf("\r%s %.0f%% (%d/%d", bar, percent, processed, total)
+		if failed > 0 {
+			statusLine += fmt.Sprintf(", %d failed", failed)
+		}
+		statusLine += ")"
+
+		// Runtime
+		statusLine += fmt.Sprintf(" ⏱ %s", formatDuration(elapsed))
+
+		// ETA
+		if eta > 0 {
+			statusLine += fmt.Sprintf(" ETA: %s (%s)", formatDuration(eta), etaTime.Format("15:04:05"))
+		} else if processed >= total && total > 0 {
+			statusLine += " ✓ Complete"
+		}
+
+		// Current item (truncated to fit)
+		if current != "" {
+			maxLen := 30
+			display := current
+			if len(display) > maxLen {
+				display = "..." + display[len(display)-maxLen+3:]
+			}
+			statusLine += fmt.Sprintf(" │ %s", display)
+		}
+
+		// Clear line and write
+		p.clearLine()
+		fmt.Fprint(p.writer, statusLine)
+	}
 }
 
 func (p *ProgressBar) buildBar(percent float64) string {

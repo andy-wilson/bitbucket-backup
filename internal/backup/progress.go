@@ -53,7 +53,7 @@ func NewProgress(total int, jsonOutput, quiet, interactive bool) *Progress {
 
 	// Create progress bar for interactive mode
 	if interactive && !jsonOutput && !quiet {
-		p.progressBar = ui.NewProgressBar(total)
+		p.progressBar = ui.NewProgressBar(total, ui.WithTwoLineMode())
 		p.progressBar.Start()
 	}
 

@@ -19,8 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual progress bar with Unicode block characters
 - Real-time elapsed time display
 - ETA countdown and expected completion timestamp
-- Current repository being processed
 - Cleaner output with debug logs going to file only
+
+#### Two-Line Progress Display
+- Current repository shown on dedicated line above progress bar
+- Animated spinner (Braille dots) indicates active processing
+- Shows "updating: repo-name" or "cloning: repo-name" with spinner
+- Displays "Complete" when finished, "Waiting..." when idle
+- Clear visual separation between status and progress metrics
 
 #### Automatic Retry for Failed Repos
 - New `--retry N` flag to automatically retry failed repos (default: 0)
