@@ -37,15 +37,18 @@ type repoStats struct {
 }
 
 // generateJobID creates a short unique job ID using UUIDv7.
-// Returns first 8 characters of a UUIDv7 for brevity in logs.
+// Returns last 8 characters (random portion) of a UUIDv7 for brevity in logs.
+// We use the last 8 chars because UUIDv7's first chars are timestamp-based
+// and would be identical for jobs submitted within the same millisecond.
 func generateJobID() string {
 	id, err := uuid.NewV7()
 	if err != nil {
 		// Fallback to random UUID if UUIDv7 fails
 		id = uuid.New()
 	}
-	// Use first 8 chars for brevity (still unique enough for log tracing)
-	return id.String()[:8]
+	// Use last 8 chars (random portion) for uniqueness within same millisecond
+	s := id.String()
+	return s[len(s)-8:]
 }
 
 // workerPool manages concurrent repository backup operations.
