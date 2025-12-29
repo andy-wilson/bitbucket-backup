@@ -75,7 +75,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extensive debug logging throughout backup process
 - Log flushing after each write ensures logs hit disk immediately
 - Timestamped log filenames to preserve history across runs
-- Worker ID prefix in API logs (`[worker-N]`) for tracing parallel operations
+- Per-repo job trace IDs (`[abc12345]`) for tracing all operations for a specific repository
+- Uses UUIDv7 (time-ordered) for unique job IDs across backup runs
+- Worker lifecycle logs still use `[worker-N]` prefix for pool management
 
 #### API Token Authentication
 - Support for Bitbucket API tokens (`api_token` auth method)

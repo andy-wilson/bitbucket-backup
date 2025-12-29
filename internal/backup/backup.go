@@ -401,11 +401,13 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	for _, project := range projects {
 		projectDir := filepath.Join(backupDir, "projects", project.Key)
 		for _, repo := range reposByProject[project.Key] {
-			b.log.Debug("processRepositories: submitting job for %s (project: %s)", repo.Slug, project.Key)
+			jobID := generateJobID()
+			b.log.Debug("[%s] Submitting job for %s (project: %s)", jobID, repo.Slug, project.Key)
 			pool.submit(repoJob{
 				baseDir:  projectDir,
 				repo:     &repo,
 				maxRetry: b.opts.MaxRetry,
+				jobID:    jobID,
 			})
 			jobCount++
 		}
@@ -414,11 +416,13 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	// Submit jobs for personal repos
 	personalDir := filepath.Join(backupDir, "personal")
 	for _, repo := range personalRepos {
-		b.log.Debug("processRepositories: submitting job for %s (personal)", repo.Slug)
+		jobID := generateJobID()
+		b.log.Debug("[%s] Submitting job for %s (personal)", jobID, repo.Slug)
 		pool.submit(repoJob{
 			baseDir:  personalDir,
 			repo:     &repo,
 			maxRetry: b.opts.MaxRetry,
+			jobID:    jobID,
 		})
 		jobCount++
 	}

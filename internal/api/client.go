@@ -28,6 +28,8 @@ type contextKey string
 const (
 	// workerIDKey is the context key for worker ID.
 	workerIDKey contextKey = "workerID"
+	// jobIDKey is the context key for job trace ID.
+	jobIDKey contextKey = "jobID"
 )
 
 // WithWorkerID returns a context with the worker ID set.
@@ -43,12 +45,38 @@ func GetWorkerID(ctx context.Context) int {
 	return 0
 }
 
-// workerPrefix returns a log prefix for the worker ID in context.
-func workerPrefix(ctx context.Context) string {
+// WithJobID returns a context with the job trace ID set.
+func WithJobID(ctx context.Context, jobID string) context.Context {
+	return context.WithValue(ctx, jobIDKey, jobID)
+}
+
+// GetJobID extracts the job trace ID from context, returns empty string if not set.
+func GetJobID(ctx context.Context) string {
+	if id, ok := ctx.Value(jobIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
+
+// LogPrefix returns a log prefix with job ID and worker ID from context.
+// Format: "[abc12345] " for tracing all logs related to a specific repo backup.
+// The job ID is the first 8 characters of a UUIDv7 (time-ordered unique ID).
+func LogPrefix(ctx context.Context) string {
+	jobID := GetJobID(ctx)
+	if jobID != "" {
+		return fmt.Sprintf("[%s] ", jobID)
+	}
+	// Fallback to worker ID only if no job ID
 	if id := GetWorkerID(ctx); id > 0 {
 		return fmt.Sprintf("[worker-%d] ", id)
 	}
 	return ""
+}
+
+// workerPrefix returns a log prefix for the worker ID in context.
+// Deprecated: Use LogPrefix instead which includes job ID.
+func workerPrefix(ctx context.Context) string {
+	return LogPrefix(ctx)
 }
 
 // ProgressFunc is called during pagination to report progress.

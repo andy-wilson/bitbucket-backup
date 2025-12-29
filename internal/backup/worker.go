@@ -11,14 +11,16 @@ import (
 	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/api"
+	"github.com/google/uuid"
 )
 
 // repoJob represents a repository backup job.
 type repoJob struct {
 	baseDir  string
 	repo     *api.Repository
-	attempt  int // Current attempt number (0-based)
-	maxRetry int // Maximum retry attempts
+	attempt  int    // Current attempt number (0-based)
+	maxRetry int    // Maximum retry attempts
+	jobID    string // Unique trace ID for this job (UUIDv7 short form)
 }
 
 // repoResult represents the result of a repository backup.
@@ -32,6 +34,18 @@ type repoResult struct {
 type repoStats struct {
 	PullRequests int
 	Issues       int
+}
+
+// generateJobID creates a short unique job ID using UUIDv7.
+// Returns first 8 characters of a UUIDv7 for brevity in logs.
+func generateJobID() string {
+	id, err := uuid.NewV7()
+	if err != nil {
+		// Fallback to random UUID if UUIDv7 fails
+		id = uuid.New()
+	}
+	// Use first 8 chars for brevity (still unique enough for log tracing)
+	return id.String()[:8]
 }
 
 // workerPool manages concurrent repository backup operations.
@@ -123,8 +137,12 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 	p.jobsProcessed.Add(1)
 	p.lastActivity.Store(time.Now().Unix())
 
-	// Add worker ID to context for API logging
+	// Add worker ID and job ID to context for logging
 	ctx = api.WithWorkerID(ctx, workerID)
+	ctx = api.WithJobID(ctx, job.jobID)
+
+	// Log prefix for this job
+	prefix := fmt.Sprintf("[%s]", job.jobID)
 
 	var jobErr error
 	var stats repoStats
@@ -136,8 +154,8 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 			jobErr = fmt.Errorf("panic recovered in worker: %v", r)
 			// Only log panics if not shutting down
 			if !b.shuttingDown.Load() {
-				b.log.Error("[worker-%d] PANIC while processing %s (attempt %d): %v", workerID, job.repo.Slug, job.attempt+1, r)
-				b.log.Error("[worker-%d] Stack trace:\n%s", workerID, stack)
+				b.log.Error("%s PANIC while processing %s (attempt %d): %v", prefix, job.repo.Slug, job.attempt+1, r)
+				b.log.Error("%s Stack trace:\n%s", prefix, stack)
 			}
 		}
 
@@ -166,8 +184,8 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 	if job.attempt > 0 {
 		attemptStr = fmt.Sprintf(" (retry %d/%d)", job.attempt, job.maxRetry)
 	}
-	b.log.Debug("[worker-%d] Processing: %s%s (jobs: %d/%d processed)",
-		workerID, job.repo.Slug, attemptStr, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
+	b.log.Debug("%s Processing: %s%s (worker-%d, jobs: %d/%d)",
+		prefix, job.repo.Slug, attemptStr, workerID, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
 
 	// Update progress with operation type
 	if b.progress != nil && !b.shuttingDown.Load() {
@@ -193,17 +211,17 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 		}
 	}
 
-	stats, jobErr = b.backupRepositoryWorker(ctx, job.baseDir, job.repo, workerID)
+	stats, jobErr = b.backupRepositoryWorker(ctx, job.baseDir, job.repo)
 
 	if jobErr == nil {
-		b.log.Debug("[worker-%d] Completed: %s%s", workerID, job.repo.Slug, attemptStr)
+		b.log.Debug("%s Completed: %s%s", prefix, job.repo.Slug, attemptStr)
 		p.sendResult(workerID, repoResult{
 			repo:  job.repo,
 			stats: stats,
 			err:   nil,
 		})
 	} else {
-		b.log.Debug("[worker-%d] Failed: %s%s - %v", workerID, job.repo.Slug, attemptStr, jobErr)
+		b.log.Debug("%s Failed: %s%s - %v", prefix, job.repo.Slug, attemptStr, jobErr)
 		// Defer will handle retry or final result
 	}
 }
@@ -223,8 +241,8 @@ func (p *workerPool) requeueJob(b *Backup, workerID int, job repoJob, err error)
 	p.jobsRetried.Add(1)
 	p.jobsSubmitted.Add(1) // Count retry as new submission
 
-	b.log.Info("[worker-%d] Retrying %s (attempt %d/%d) after error: %v",
-		workerID, job.repo.Slug, job.attempt+1, job.maxRetry+1, err)
+	b.log.Info("[%s] Retrying %s (attempt %d/%d) after error: %v",
+		job.jobID, job.repo.Slug, job.attempt+1, job.maxRetry+1, err)
 
 	// Brief delay before retry to avoid hammering on transient errors
 	time.Sleep(time.Duration(job.attempt) * 2 * time.Second)
@@ -235,7 +253,7 @@ func (p *workerPool) requeueJob(b *Backup, workerID int, job repoJob, err error)
 		p.lastActivity.Store(time.Now().Unix())
 	default:
 		// Buffer full - shouldn't happen with our sizing, but handle gracefully
-		b.log.Error("[worker-%d] Failed to requeue %s - job buffer full", workerID, job.repo.Slug)
+		b.log.Error("[%s] Failed to requeue %s - job buffer full", job.jobID, job.repo.Slug)
 		p.sendResult(workerID, repoResult{repo: job.repo, err: err})
 	}
 }
@@ -326,8 +344,9 @@ func (p *workerPool) closeResults() {
 }
 
 // backupRepositoryWorker is a worker-friendly version of backupRepository.
-func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, repo *api.Repository, workerID int) (repoStats, error) {
+func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, repo *api.Repository) (repoStats, error) {
 	var stats repoStats
+	prefix := api.LogPrefix(ctx)
 
 	// Timestamped directory for this run's data
 	repoDir := baseDir + "/repositories/" + repo.Slug
@@ -349,25 +368,25 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 
 	// Backup pull requests if enabled (skip in git-only mode)
 	if b.cfg.Backup.IncludePRs && !b.opts.GitOnly {
-		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, latestRepoDir, repo, workerID)
+		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, latestRepoDir, repo)
 		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
-			b.log.Error("[worker-%d] Failed to backup PRs for %s: %v", workerID, repo.Slug, err)
+			b.log.Error("%sFailed to backup PRs for %s: %v", prefix, repo.Slug, err)
 		}
 		stats.PullRequests = prCount
 	}
 
 	// Backup issues if enabled (skip in git-only mode)
 	if b.cfg.Backup.IncludeIssues && repo.HasIssues && !b.opts.GitOnly {
-		issueCount, err := b.backupIssuesWorker(ctx, repoDir, latestRepoDir, repo, workerID)
+		issueCount, err := b.backupIssuesWorker(ctx, repoDir, latestRepoDir, repo)
 		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
-			b.log.Error("[worker-%d] Failed to backup issues for %s: %v", workerID, repo.Slug, err)
+			b.log.Error("%sFailed to backup issues for %s: %v", prefix, repo.Slug, err)
 		}
 		stats.Issues = issueCount
 	}
 
 	// Clone/fetch the git repository (skip in metadata-only mode)
 	if !b.opts.MetadataOnly {
-		if err := b.backupGitRepo(ctx, repoDir, repo, workerID); err != nil {
+		if err := b.backupGitRepo(ctx, repoDir, repo); err != nil {
 			return stats, err
 		}
 	}
@@ -377,7 +396,8 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 
 // backupPullRequestsWorker is a worker-friendly version that returns count.
 // Saves PRs to both timestamped (repoDir) and latest (latestRepoDir) directories.
-func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRepoDir string, repo *api.Repository, workerID int) (int, error) {
+func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRepoDir string, repo *api.Repository) (int, error) {
+	prefix := api.LogPrefix(ctx)
 	var prs []api.PullRequest
 	var err error
 	var isIncremental bool
@@ -392,7 +412,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 			return 0, err
 		}
 		if len(prs) > 0 {
-			b.log.Debug("[worker-%d] Found %d updated pull requests for %s (since %s)", workerID, len(prs), repo.Slug, lastPRUpdated)
+			b.log.Debug("%sFound %d updated pull requests for %s (since %s)", prefix, len(prs), repo.Slug, lastPRUpdated)
 		}
 	} else {
 		// Full backup: fetch all PRs
@@ -401,7 +421,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 			return 0, err
 		}
 		if len(prs) > 0 {
-			b.log.Debug("[worker-%d] Found %d pull requests for %s", workerID, len(prs), repo.Slug)
+			b.log.Debug("%sFound %d pull requests for %s", prefix, len(prs), repo.Slug)
 		}
 	}
 
@@ -431,12 +451,12 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 
 		// Save to timestamped directory
 		if err := b.savePR(ctx, prDir, repo.Slug, &pr); err != nil {
-			b.log.Error("[worker-%d] Failed to save PR #%d: %v", workerID, pr.ID, err)
+			b.log.Error("%sFailed to save PR #%d: %v", prefix, pr.ID, err)
 			continue
 		}
 		// Save to latest directory (aggregated)
 		if err := b.savePR(ctx, latestPRDir, repo.Slug, &pr); err != nil {
-			b.log.Error("[worker-%d] Failed to save PR #%d to latest: %v", workerID, pr.ID, err)
+			b.log.Error("%sFailed to save PR #%d to latest: %v", prefix, pr.ID, err)
 		}
 		count++
 	}
@@ -454,7 +474,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 
 // savePR saves a single PR and its related data.
 func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.PullRequest) error {
-	workerID := api.GetWorkerID(ctx)
+	prefix := api.LogPrefix(ctx)
 	prFile := fmt.Sprintf("%d.json", pr.ID)
 	if err := b.saveJSON(prDir, prFile, pr); err != nil {
 		return err
@@ -466,11 +486,11 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 		comments, err := b.client.GetPullRequestComments(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
-				b.log.Error("[worker-%d] Failed to fetch comments for PR #%d: %v", workerID, pr.ID, err)
+				b.log.Error("%sFailed to fetch comments for PR #%d: %v", prefix, pr.ID, err)
 			}
 		} else if len(comments) > 0 {
 			if err := b.saveJSON(prSubDir, "comments.json", comments); err != nil {
-				b.log.Error("[worker-%d] Failed to save comments for PR #%d: %v", workerID, pr.ID, err)
+				b.log.Error("%sFailed to save comments for PR #%d: %v", prefix, pr.ID, err)
 			}
 		}
 	}
@@ -479,11 +499,11 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 		activity, err := b.client.GetPullRequestActivity(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
-				b.log.Error("[worker-%d] Failed to fetch activity for PR #%d: %v", workerID, pr.ID, err)
+				b.log.Error("%sFailed to fetch activity for PR #%d: %v", prefix, pr.ID, err)
 			}
 		} else if len(activity) > 0 {
 			if err := b.saveJSON(prSubDir, "activity.json", activity); err != nil {
-				b.log.Error("[worker-%d] Failed to save activity for PR #%d: %v", workerID, pr.ID, err)
+				b.log.Error("%sFailed to save activity for PR #%d: %v", prefix, pr.ID, err)
 			}
 		}
 	}
@@ -493,7 +513,8 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 
 // backupIssuesWorker is a worker-friendly version that returns count.
 // Saves issues to both timestamped (repoDir) and latest (latestRepoDir) directories.
-func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir string, repo *api.Repository, workerID int) (int, error) {
+func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir string, repo *api.Repository) (int, error) {
+	prefix := api.LogPrefix(ctx)
 	var issues []api.Issue
 	var err error
 	var isIncremental bool
@@ -508,7 +529,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 			return 0, err
 		}
 		if len(issues) > 0 {
-			b.log.Debug("[worker-%d] Found %d updated issues for %s (since %s)", workerID, len(issues), repo.Slug, lastIssueUpdated)
+			b.log.Debug("%sFound %d updated issues for %s (since %s)", prefix, len(issues), repo.Slug, lastIssueUpdated)
 		}
 	} else {
 		// Full backup: fetch all issues
@@ -517,7 +538,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 			return 0, err
 		}
 		if len(issues) > 0 {
-			b.log.Debug("[worker-%d] Found %d issues for %s", workerID, len(issues), repo.Slug)
+			b.log.Debug("%sFound %d issues for %s", prefix, len(issues), repo.Slug)
 		}
 	}
 
@@ -551,12 +572,12 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 
 		// Save to timestamped directory
 		if err := b.saveIssue(ctx, issueDir, repo.Slug, &issue); err != nil {
-			b.log.Error("[worker-%d] Failed to save issue #%d: %v", workerID, issue.ID, err)
+			b.log.Error("%sFailed to save issue #%d: %v", prefix, issue.ID, err)
 			continue
 		}
 		// Save to latest directory (aggregated)
 		if err := b.saveIssue(ctx, latestIssueDir, repo.Slug, &issue); err != nil {
-			b.log.Error("[worker-%d] Failed to save issue #%d to latest: %v", workerID, issue.ID, err)
+			b.log.Error("%sFailed to save issue #%d to latest: %v", prefix, issue.ID, err)
 		}
 		count++
 	}
@@ -571,7 +592,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 
 // saveIssue saves a single issue and its related data.
 func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue *api.Issue) error {
-	workerID := api.GetWorkerID(ctx)
+	prefix := api.LogPrefix(ctx)
 	issueFile := fmt.Sprintf("%d.json", issue.ID)
 	if err := b.saveJSON(issueDir, issueFile, issue); err != nil {
 		return err
@@ -583,11 +604,11 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 		comments, err := b.client.GetIssueComments(ctx, b.cfg.Workspace, repoSlug, issue.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
-				b.log.Error("[worker-%d] Failed to fetch comments for issue #%d: %v", workerID, issue.ID, err)
+				b.log.Error("%sFailed to fetch comments for issue #%d: %v", prefix, issue.ID, err)
 			}
 		} else if len(comments) > 0 {
 			if err := b.saveJSON(issueSubDir, "comments.json", comments); err != nil {
-				b.log.Error("[worker-%d] Failed to save comments for issue #%d: %v", workerID, issue.ID, err)
+				b.log.Error("%sFailed to save comments for issue #%d: %v", prefix, issue.ID, err)
 			}
 		}
 	}
@@ -610,10 +631,11 @@ func (b *Backup) getLatestGitPath(repo *api.Repository) string {
 	return b.getLatestRepoDir(repo) + "/repo.git"
 }
 
-func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository, workerID int) error {
+func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository) error {
+	prefix := api.LogPrefix(ctx)
 	cloneURL := repo.CloneURL()
 	if cloneURL == "" {
-		b.log.Debug("[worker-%d] No HTTPS clone URL found for %s, skipping git clone", workerID, repo.Slug)
+		b.log.Debug("%sNo HTTPS clone URL found for %s, skipping git clone", prefix, repo.Slug)
 		return nil
 	}
 
@@ -622,7 +644,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	latestGitDir := b.getLatestGitPath(repo)
 
 	if b.opts.DryRun {
-		b.log.Info("[worker-%d] [DRY RUN] Would clone %s", workerID, repo.Slug)
+		b.log.Info("%s[DRY RUN] Would clone %s", prefix, repo.Slug)
 		return nil
 	}
 
@@ -632,7 +654,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	if len(gitPass) > 4 {
 		maskedPass = gitPass[:4] + "***"
 	}
-	b.log.Debug("[worker-%d] Git auth: user=%q, pass=%s, method=%s", workerID, gitUser, maskedPass, b.cfg.Auth.Method)
+	b.log.Debug("%sGit auth: user=%q, pass=%s, method=%s", prefix, gitUser, maskedPass, b.cfg.Auth.Method)
 
 	fullGitPath := b.storage.BasePath() + "/" + latestGitDir
 
@@ -654,14 +676,14 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 		defer func() {
 			if r := recover(); r != nil {
 				goGitErr = fmt.Errorf("go-git panic: %v", r)
-				b.log.Debug("[worker-%d] go-git panicked: %v", workerID, r)
+				b.log.Debug("%sgo-git panicked: %v", prefix, r)
 			}
 		}()
 		if isClone {
-			b.log.Debug("[worker-%d] Cloning %s (mirror, go-git)", workerID, repo.Slug)
+			b.log.Debug("%sCloning %s (mirror, go-git)", prefix, repo.Slug)
 			goGitErr = b.gitClient.CloneMirror(gitCtx, cloneURL, fullGitPath)
 		} else {
-			b.log.Debug("[worker-%d] Fetching updates for %s (go-git)", workerID, repo.Slug)
+			b.log.Debug("%sFetching updates for %s (go-git)", prefix, repo.Slug)
 			goGitErr = b.gitClient.Fetch(gitCtx, fullGitPath)
 		}
 	}()
@@ -690,7 +712,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	}
 
 	// Try shell git as fallback
-	b.log.Debug("[worker-%d] go-git failed (%v), retrying with git CLI", workerID, goGitErr)
+	b.log.Debug("%sgo-git failed (%v), retrying with git CLI", prefix, goGitErr)
 
 	// Reset context timeout for retry
 	gitCtx2, cancel2 := context.WithTimeout(ctx, timeout)
@@ -699,7 +721,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	if isClone {
 		// Clean up failed go-git attempt
 		_ = os.RemoveAll(fullGitPath)
-		b.log.Debug("[worker-%d] Cloning %s (mirror, git CLI fallback)", workerID, repo.Slug)
+		b.log.Debug("%sCloning %s (mirror, git CLI fallback)", prefix, repo.Slug)
 		if err := b.shellGitClient.CloneMirror(gitCtx2, cloneURL, fullGitPath); err != nil {
 			if gitCtx2.Err() == context.DeadlineExceeded {
 				return fmt.Errorf("git clone timed out after %d minutes (CLI fallback)", b.cfg.Backup.GitTimeoutMinutes)
@@ -707,7 +729,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 			return fmt.Errorf("git CLI fallback also failed: %w (original go-git error: %v)", err, goGitErr)
 		}
 	} else {
-		b.log.Debug("[worker-%d] Fetching updates for %s (git CLI fallback)", workerID, repo.Slug)
+		b.log.Debug("%sFetching updates for %s (git CLI fallback)", prefix, repo.Slug)
 		if err := b.shellGitClient.Fetch(gitCtx2, fullGitPath); err != nil {
 			if gitCtx2.Err() == context.DeadlineExceeded {
 				return fmt.Errorf("git fetch timed out after %d minutes (CLI fallback)", b.cfg.Backup.GitTimeoutMinutes)
@@ -716,7 +738,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 		}
 	}
 
-	b.log.Debug("[worker-%d] git CLI fallback succeeded for %s", workerID, repo.Slug)
+	b.log.Debug("%sgit CLI fallback succeeded for %s", prefix, repo.Slug)
 	return nil
 }
 
