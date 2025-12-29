@@ -101,6 +101,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Only shows summary at end with interrupted count
 - Previously logged every cancelled operation as an error
 
+#### Fast Shutdown on CTRL-C
+- Workers now exit immediately when context is cancelled
+- Previously workers would drain entire job queue (could take minutes)
+- Only in-progress jobs complete; pending jobs are abandoned
+- Shutdown now completes in seconds instead of minutes
+
 #### Interrupted Repos Not Counted as Failed
 - Repos interrupted by CTRL-C are now tracked separately from failures
 - Interrupted repos are NOT added to the failed list in state file
