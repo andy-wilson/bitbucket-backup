@@ -170,10 +170,11 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 		workerID, job.repo.Slug, attemptStr, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
 
 	// Update progress with whether this is an update (fetch) or new clone
-	// Check the latest directory since that's where git repos are stored
+	// Check for HEAD file to verify it's a valid git repo (not just an empty directory)
 	if b.progress != nil && !b.shuttingDown.Load() {
 		latestGitPath := b.storage.BasePath() + "/" + b.getLatestGitPath(job.repo)
-		if _, err := os.Stat(latestGitPath); err == nil {
+		headPath := latestGitPath + "/HEAD"
+		if _, err := os.Stat(headPath); err == nil {
 			b.progress.StartWithType(job.repo.Slug, "updating")
 		} else {
 			b.progress.StartWithType(job.repo.Slug, "cloning")
@@ -627,8 +628,10 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	defer cancel()
 
 	// Try go-git first, fall back to shell git if it fails
+	// Check for HEAD file to verify it's a valid git repo (not just an empty directory)
 	isClone := false
-	if _, err := os.Stat(fullGitPath); os.IsNotExist(err) {
+	headPath := fullGitPath + "/HEAD"
+	if _, err := os.Stat(headPath); os.IsNotExist(err) {
 		isClone = true
 	}
 

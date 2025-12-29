@@ -622,20 +622,21 @@ func isContextCanceled(err error) bool {
 }
 
 // countExistingRepos counts how many repos already have a backup (update) vs new.
-// Checks the latest directory since that's where git repos are stored.
+// Checks the latest directory for HEAD file to verify it's a valid git repo.
 func (b *Backup) countExistingRepos(backupDir string, repos []api.Repository, projects []api.Project) (existing, newRepos int) {
 	basePath := b.storage.BasePath()
 
 	for _, repo := range repos {
 		// Check the latest directory for existing git repos
-		var latestGitDir string
+		// Look for HEAD file to verify it's a valid git repo (not just an empty directory)
+		var headPath string
 		if repo.Project != nil && repo.Project.Key != "" {
-			latestGitDir = filepath.Join(basePath, b.cfg.Workspace, "latest", "projects", repo.Project.Key, "repositories", repo.Slug, "repo.git")
+			headPath = filepath.Join(basePath, b.cfg.Workspace, "latest", "projects", repo.Project.Key, "repositories", repo.Slug, "repo.git", "HEAD")
 		} else {
-			latestGitDir = filepath.Join(basePath, b.cfg.Workspace, "latest", "personal", "repositories", repo.Slug, "repo.git")
+			headPath = filepath.Join(basePath, b.cfg.Workspace, "latest", "personal", "repositories", repo.Slug, "repo.git", "HEAD")
 		}
 
-		if _, err := os.Stat(latestGitDir); err == nil {
+		if _, err := os.Stat(headPath); err == nil {
 			existing++
 		} else {
 			newRepos++
