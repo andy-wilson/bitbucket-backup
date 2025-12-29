@@ -631,14 +631,23 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	// Check for HEAD file to verify it's a valid git repo (not just an empty directory)
 	isClone := !isValidGitRepo(fullGitPath)
 
+	// Wrap go-git calls in panic recovery so we can fall back to shell git
 	var goGitErr error
-	if isClone {
-		b.log.Debug("[worker-%d] Cloning %s (mirror, go-git)", workerID, repo.Slug)
-		goGitErr = b.gitClient.CloneMirror(gitCtx, cloneURL, fullGitPath)
-	} else {
-		b.log.Debug("[worker-%d] Fetching updates for %s (go-git)", workerID, repo.Slug)
-		goGitErr = b.gitClient.Fetch(gitCtx, fullGitPath)
-	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				goGitErr = fmt.Errorf("go-git panic: %v", r)
+				b.log.Debug("[worker-%d] go-git panicked: %v", workerID, r)
+			}
+		}()
+		if isClone {
+			b.log.Debug("[worker-%d] Cloning %s (mirror, go-git)", workerID, repo.Slug)
+			goGitErr = b.gitClient.CloneMirror(gitCtx, cloneURL, fullGitPath)
+		} else {
+			b.log.Debug("[worker-%d] Fetching updates for %s (go-git)", workerID, repo.Slug)
+			goGitErr = b.gitClient.Fetch(gitCtx, fullGitPath)
+		}
+	}()
 
 	// If go-git succeeded, we're done
 	if goGitErr == nil {
@@ -702,6 +711,7 @@ func isGoGitRetryableError(err error) bool {
 	errStr := err.Error()
 	// Known go-git issues that shell git handles better
 	retryablePatterns := []string{
+		"go-git panic",
 		"packfile is nil",
 		"nil pointer",
 		"invalid memory address",
