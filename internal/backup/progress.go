@@ -111,9 +111,11 @@ func (p *Progress) Complete(name string) {
 		if activeCount > 1 {
 			p.progressBar.SetCurrent(fmt.Sprintf("%d repos in progress", activeCount))
 		} else if activeCount == 1 {
-			// Don't change - let the single active worker's name show
+			p.progressBar.SetCurrent("1 repo in progress")
+		} else {
+			// activeCount == 0: nothing in progress
+			p.progressBar.SetCurrent("")
 		}
-		// activeCount == 0 means nothing in progress, spinner will show "Waiting..."
 	} else {
 		p.mu.Lock()
 		p.emitProgress("complete", fmt.Sprintf("Completed: %s", name))
@@ -135,6 +137,11 @@ func (p *Progress) Fail(name string, err error) {
 		// Update status to reflect remaining active count
 		if activeCount > 1 {
 			p.progressBar.SetCurrent(fmt.Sprintf("%d repos in progress", activeCount))
+		} else if activeCount == 1 {
+			p.progressBar.SetCurrent("1 repo in progress")
+		} else {
+			// activeCount == 0: nothing in progress
+			p.progressBar.SetCurrent("")
 		}
 	} else {
 		p.mu.Lock()

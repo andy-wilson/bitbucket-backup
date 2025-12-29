@@ -129,6 +129,7 @@ func (p *ProgressBar) SetCurrent(name string) {
 }
 
 // Complete marks an item as completed.
+// Note: Does not clear current - caller should manage via SetCurrent.
 func (p *ProgressBar) Complete(name string) {
 	p.mu.Lock()
 	elapsed := time.Since(p.startTime)
@@ -138,16 +139,15 @@ func (p *ProgressBar) Complete(name string) {
 		p.avgDuration = avgPerItem
 	}
 	p.completed++
-	p.current = ""
 	p.completedList = append(p.completedList, elapsed)
 	p.mu.Unlock()
 }
 
 // Fail marks an item as failed.
+// Note: Does not clear current - caller should manage via SetCurrent.
 func (p *ProgressBar) Fail(name string) {
 	p.mu.Lock()
 	p.failed++
-	p.current = ""
 	p.mu.Unlock()
 }
 
