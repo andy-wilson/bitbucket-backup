@@ -221,8 +221,20 @@ func (c *GoGitClient) Fetch(ctx context.Context, repoPath string) error {
 	}
 
 	// Open the existing repository
+	// Check if git data is in .git subdirectory (go-git style) or directly in repoPath (bare style)
 	fs := osfs.New(repoPath)
-	storage := filesystem.NewStorage(fs, nil)
+	var storage *filesystem.Storage
+	if _, err := os.Stat(repoPath + "/.git"); err == nil {
+		// go-git nested style: repo.git/.git/
+		dot, err := fs.Chroot(".git")
+		if err != nil {
+			return fmt.Errorf("accessing .git directory: %w", err)
+		}
+		storage = filesystem.NewStorage(dot, nil)
+	} else {
+		// Standard bare repo style: repo.git/
+		storage = filesystem.NewStorage(fs, nil)
+	}
 
 	repo, err := git.Open(storage, nil)
 	if err != nil {
