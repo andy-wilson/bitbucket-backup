@@ -86,6 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Empty Repository Handling
+- Empty Bitbucket repositories (no commits) are now handled gracefully
+- Previously treated as clone failures, triggering unnecessary retries
+- Now initializes an empty bare git repo with remote configured
+- Future fetches will work once content is pushed to the remote
+- Logs "Remote repository is empty" instead of failing
+
 #### API Token Credentials
 - Fixed API token auth: email for API calls, username for git operations
 - Previously had these reversed, causing authentication failures

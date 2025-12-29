@@ -179,6 +179,21 @@ func (c *GoGitClient) CloneMirror(ctx context.Context, repoURL, destPath string)
 		Progress: progress,
 	})
 	if err != nil {
+		// Handle empty remote repositories gracefully
+		if errors.Is(err, transport.ErrEmptyRemoteRepository) {
+			if c.logFunc != nil {
+				c.logFunc("  Remote repository is empty, initializing bare repo")
+			}
+			// Initialize an empty bare repository with the remote configured
+			if initErr := c.initEmptyMirror(destPath, repoURL); initErr != nil {
+				_ = os.RemoveAll(destPath)
+				return fmt.Errorf("initializing empty mirror: %w", initErr)
+			}
+			if c.logFunc != nil {
+				c.logFunc("  Empty repository initialized (nothing to backup)")
+			}
+			return nil
+		}
 		// Clean up on failure
 		_ = os.RemoveAll(destPath)
 		return fmt.Errorf("git clone failed: %w", err)
@@ -323,4 +338,40 @@ func (c *GoGitClient) Fsck(_ context.Context, repoPath string) error {
 // maskCredentialsInURL removes credentials from a URL for safe logging.
 func maskCredentialsInURL(repoURL string) string {
 	return maskCredentials(repoURL)
+}
+
+// initEmptyMirror initializes an empty bare git repository with the origin remote configured.
+// This is used when cloning an empty remote repository.
+func (c *GoGitClient) initEmptyMirror(destPath, repoURL string) error {
+	// Set up filesystem storage for bare repo
+	fs := osfs.New(destPath)
+	storage := filesystem.NewStorage(fs, nil)
+
+	// Initialize empty repo
+	repo, err := git.Init(storage, nil)
+	if err != nil {
+		return fmt.Errorf("init bare repo: %w", err)
+	}
+
+	// Configure as bare repository
+	cfg, err := repo.Config()
+	if err != nil {
+		return fmt.Errorf("getting config: %w", err)
+	}
+	cfg.Core.IsBare = true
+
+	// Add origin remote with mirror fetch refspec
+	cfg.Remotes["origin"] = &config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{repoURL},
+		Fetch: []config.RefSpec{
+			"+refs/*:refs/*",
+		},
+	}
+
+	if err := repo.SetConfig(cfg); err != nil {
+		return fmt.Errorf("setting config: %w", err)
+	}
+
+	return nil
 }
