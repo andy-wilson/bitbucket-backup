@@ -147,12 +147,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - State struct now protected by sync.RWMutex
 - Safe for concurrent access from multiple workers
 
-#### Latest Directory for Git Repos
-- Git repos now stored in `<workspace>/latest/` directory
-- Repos are updated incrementally (fetch) instead of re-cloned each run
-- Timestamped directories (`<workspace>/<timestamp>/`) contain only metadata
+#### Latest Directory (Complete Archive)
+- `latest/` directory contains complete, aggregated archive of everything
+- Git repos updated incrementally (fetch) instead of re-cloned each run
+- PRs, issues, comments all saved to both `latest/` and timestamped directories
+- `latest/` = always-current complete archive
+- Timestamped directories = audit trail of what was fetched each run
 - Dramatically faster backups for subsequent runs
-- Structure: `latest/projects/<project>/repositories/<repo>/repo.git`
+- Structure: `latest/projects/<project>/repositories/<repo>/`
 
 #### Accurate Parallel Progress Display
 - Progress bar now shows "N repos in progress" when multiple workers active

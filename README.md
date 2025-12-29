@@ -246,17 +246,24 @@ bb-backup version
 /backups/
 └── my-workspace/
     ├── .bb-backup-state.json      # State file for incremental backups
-    ├── latest/                    # Shared git repos (updated incrementally)
+    ├── latest/                    # Complete, aggregated archive (always current)
     │   ├── projects/
     │   │   └── PROJECT-KEY/
     │   │       └── repositories/
     │   │           └── repo-name/
-    │   │               └── repo.git/      # Git mirror clone (fetch updates)
+    │   │               ├── repo.git/          # Git mirror (incrementally updated)
+    │   │               ├── repository.json    # Repository metadata
+    │   │               ├── pull-requests/     # All PRs (aggregated)
+    │   │               │   ├── 1.json
+    │   │               │   └── 1/
+    │   │               │       ├── comments.json
+    │   │               │       └── activity.json
+    │   │               └── issues/            # All issues (aggregated)
+    │   │                   └── ...
     │   └── personal/
     │       └── repositories/
-    │           └── repo-name/
-    │               └── repo.git/
-    ├── 2024-01-15T10-30-00Z/      # Timestamped backup run
+    │           └── ...
+    ├── 2024-01-15T10-30-00Z/      # Timestamped backup run (audit trail)
     │   ├── manifest.json          # Backup manifest
     │   ├── workspace.json         # Workspace metadata
     │   ├── projects/
@@ -265,20 +272,12 @@ bb-backup version
     │   │       └── repositories/
     │   │           └── repo-name/
     │   │               ├── repository.json    # Repository metadata
-    │   │               ├── pull-requests/
-    │   │               │   ├── 1.json         # PR metadata
-    │   │               │   └── 1/
-    │   │               │       ├── comments.json
-    │   │               │       └── activity.json
-    │   │               └── issues/
-    │   │                   ├── 1.json         # Issue metadata
-    │   │                   └── 1/
-    │   │                       └── comments.json
+    │   │               ├── pull-requests/     # PRs fetched this run
+    │   │               └── issues/            # Issues fetched this run
     │   └── personal/
     │       └── repositories/
-    │           └── personal-repo/
-    │               └── ...
-    └── 2024-01-16T10-30-00Z/      # Next backup run (metadata only)
+    │           └── ...
+    └── 2024-01-16T10-30-00Z/      # Next backup run
         └── ...
 ```
 

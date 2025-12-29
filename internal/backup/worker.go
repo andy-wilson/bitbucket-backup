@@ -335,7 +335,7 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 
 	// Backup pull requests if enabled
 	if b.cfg.Backup.IncludePRs {
-		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, repo, workerID)
+		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, latestRepoDir, repo, workerID)
 		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
 			b.log.Error("[worker-%d] Failed to backup PRs for %s: %v", workerID, repo.Slug, err)
 		}
@@ -344,7 +344,7 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 
 	// Backup issues if enabled
 	if b.cfg.Backup.IncludeIssues && repo.HasIssues {
-		issueCount, err := b.backupIssuesWorker(ctx, repoDir, repo, workerID)
+		issueCount, err := b.backupIssuesWorker(ctx, repoDir, latestRepoDir, repo, workerID)
 		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
 			b.log.Error("[worker-%d] Failed to backup issues for %s: %v", workerID, repo.Slug, err)
 		}
@@ -360,7 +360,8 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 }
 
 // backupPullRequestsWorker is a worker-friendly version that returns count.
-func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, repo *api.Repository, workerID int) (int, error) {
+// Saves PRs to both timestamped (repoDir) and latest (latestRepoDir) directories.
+func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRepoDir string, repo *api.Repository, workerID int) (int, error) {
 	var prs []api.PullRequest
 	var err error
 	var isIncremental bool
@@ -393,6 +394,7 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, r
 	}
 
 	prDir := repoDir + "/pull-requests"
+	latestPRDir := latestRepoDir + "/pull-requests"
 	count := 0
 	var latestUpdated string
 
@@ -411,9 +413,14 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir string, r
 			continue
 		}
 
+		// Save to timestamped directory
 		if err := b.savePR(ctx, prDir, repo.Slug, &pr); err != nil {
 			b.log.Error("[worker-%d] Failed to save PR #%d: %v", workerID, pr.ID, err)
 			continue
+		}
+		// Save to latest directory (aggregated)
+		if err := b.savePR(ctx, latestPRDir, repo.Slug, &pr); err != nil {
+			b.log.Error("[worker-%d] Failed to save PR #%d to latest: %v", workerID, pr.ID, err)
 		}
 		count++
 	}
@@ -468,7 +475,8 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 }
 
 // backupIssuesWorker is a worker-friendly version that returns count.
-func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *api.Repository, workerID int) (int, error) {
+// Saves issues to both timestamped (repoDir) and latest (latestRepoDir) directories.
+func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir string, repo *api.Repository, workerID int) (int, error) {
 	var issues []api.Issue
 	var err error
 	var isIncremental bool
@@ -505,6 +513,7 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *a
 	}
 
 	issueDir := repoDir + "/issues"
+	latestIssueDir := latestRepoDir + "/issues"
 	count := 0
 	var latestUpdated string
 
@@ -523,9 +532,14 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir string, repo *a
 			continue
 		}
 
+		// Save to timestamped directory
 		if err := b.saveIssue(ctx, issueDir, repo.Slug, &issue); err != nil {
 			b.log.Error("[worker-%d] Failed to save issue #%d: %v", workerID, issue.ID, err)
 			continue
+		}
+		// Save to latest directory (aggregated)
+		if err := b.saveIssue(ctx, latestIssueDir, repo.Slug, &issue); err != nil {
+			b.log.Error("[worker-%d] Failed to save issue #%d to latest: %v", workerID, issue.ID, err)
 		}
 		count++
 	}
