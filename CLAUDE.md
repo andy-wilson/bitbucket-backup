@@ -27,7 +27,10 @@ This file provides context for Claude Code when working on this project.
 | `SPEC.md` | Full project specification with requirements and acceptance criteria |
 | `QUICKSTART.md` | Getting started guide |
 | `cmd/bb-backup/main.go` | CLI entrypoint |
-| `cmd/bb-backup/cmd/` | CLI commands (backup, list, verify, retry-failed, version) |
+| `cmd/bb-backup/cmd/backup.go` | Backup command with all flags |
+| `cmd/bb-backup/cmd/list.go` | List command with JSON output |
+| `cmd/bb-backup/cmd/verify.go` | Verify command for backup integrity |
+| `cmd/bb-backup/cmd/retry.go` | Retry-failed command |
 | `internal/api/` | Bitbucket API client with rate limiting |
 | `internal/api/client.go` | HTTP client with retry logic |
 | `internal/api/ratelimit.go` | Token bucket rate limiter |
@@ -46,6 +49,7 @@ This file provides context for Claude Code when working on this project.
 | `internal/storage/` | Storage backends (local filesystem) |
 | `internal/ui/` | Terminal UI components (spinner, progress bar) |
 | `internal/ui/progressbar.go` | Interactive progress bar with ETA |
+| `patches/` | Patches for forked dependencies (go-git nil packfile fix) |
 
 ## Build Commands
 
@@ -78,29 +82,44 @@ make clean
 
 ## Architecture Notes
 
+### Core Components
 - API client has built-in rate limiting (token bucket + backoff on 429)
 - Config supports environment variable substitution `${VAR_NAME}`
 - Output structure mirrors Bitbucket hierarchy: workspace/project/repo
 - Personal repos (no project) go under `personal/` directory
+- State file (`.bb-backup-state.json`) tracks last backup for incremental support
+
+### Storage Structure
 - **Latest directory**: Git repos stored in `<workspace>/latest/` for incremental updates
   - Repos are fetched (updated) instead of re-cloned on subsequent runs
   - Timestamped directories (`<workspace>/<timestamp>/`) contain metadata only
   - Structure: `latest/projects/<project>/repositories/<repo>/repo.git`
-- State file (`.bb-backup-state.json`) tracks last backup for incremental support
-- Worker pool enables parallel git operations with worker ID tracking in logs
-- Filter supports glob patterns for include/exclude
-- Single-repo mode (`--repo`) fetches directly via API (optimized)
-- Git operations have configurable timeout (`git_timeout_minutes`)
-- API tokens: email for API calls, username for git operations
-- Pure Go git via go-git library with shell git CLI fallback
+
+### Worker Pool & Parallelism
+- Worker pool enables parallel git operations (auto-scales 2x CPU cores, clamped 4-16)
+- Per-repo job trace IDs using UUIDv7 (last 8 chars for uniqueness)
+- Log format: `[abc12345] Processing: repo-name` for tracing all ops for a repo
+- Panic recovery in workers with stack trace logging
+- Interrupted repos tracked separately from failures (not added to retry list)
+
+### Git Operations
+- Pure Go git via go-git library (no external git CLI required)
 - Automatic fallback to `git` CLI for packfile errors, nil pointer panics
 - Git HTTP transport integrated with API rate limiter
+- Configurable timeout (`git_timeout_minutes`, default: 30)
+- Empty repositories handled gracefully (initializes bare repo with remote)
+
+### API & Authentication
+- API tokens: email for API calls, username for git operations
+- Single-repo mode (`--repo`) fetches directly via API (optimized)
+- Incremental backup uses `UpdatedSince` API for PRs/issues (only fetches changes)
+- Filter supports glob patterns for include/exclude
+
+### Progress & UI
 - Activity spinner for long operations (terminal-only, auto-detected)
 - Interactive progress bar mode (`-i`) with ETA and visual progress
-- Incremental backup uses `UpdatedSince` API for PRs/issues (only fetches changes)
+- Metadata progress shows: "fetching PRs", "saving PRs (3/10)", "PR #123 comments"
 - Graceful shutdown on CTRL-C with 5-second timeout
-- Interrupted repos tracked separately from failures (not added to retry list)
-- Panic recovery in workers with stack trace logging
 
 ## Common Tasks
 
@@ -134,6 +153,12 @@ bb-backup backup --repo my-repo-name -w your-workspace
 bb-backup verify /path/to/backup
 ```
 
+### Retrying failed repos with progress bar
+
+```bash
+bb-backup retry-failed -i -c config.yaml
+```
+
 ## Testing Without a Workspace
 
 Since no test workspace is available:
@@ -144,9 +169,11 @@ Since no test workspace is available:
 ## Test Coverage
 
 Current test coverage by package:
-- `internal/config`: ~80%
-- `internal/api`: ~57%
+- `internal/ui`: ~98%
+- `internal/logging`: ~96%
 - `internal/storage`: ~84%
-- `internal/git`: ~45%
-- `internal/backup`: ~12%
-- `cmd/bb-backup/cmd`: ~31%
+- `internal/config`: ~80%
+- `internal/api`: ~59%
+- `internal/git`: ~42%
+- `cmd/bb-backup/cmd`: ~25%
+- `internal/backup`: ~24%

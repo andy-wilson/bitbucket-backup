@@ -7,8 +7,6 @@ bin/
 *.dylib
 /bb-backup
 
-backups
-
 # Test coverage
 coverage.out
 coverage.html
@@ -31,12 +29,17 @@ Thumbs.db
 # Config with secrets (use example.yaml as template)
 bb-backup.yaml
 config.yaml
+configs/*.local.yaml
+configs/*-local.yaml
 
 # State files
 .bb-backup-state.json
+backups/
 
 # Logs
 *.log
+logs/*
+!logs/.gitkeep
 
 # Temporary files
 tmp/

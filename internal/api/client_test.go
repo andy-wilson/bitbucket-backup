@@ -341,3 +341,149 @@ func TestBuildURL(t *testing.T) {
 		}
 	}
 }
+
+func TestContextWorkerID(t *testing.T) {
+	ctx := context.Background()
+
+	// No worker ID set
+	if id := GetWorkerID(ctx); id != 0 {
+		t.Errorf("GetWorkerID() = %d, want 0", id)
+	}
+
+	// With worker ID
+	ctx = WithWorkerID(ctx, 5)
+	if id := GetWorkerID(ctx); id != 5 {
+		t.Errorf("GetWorkerID() = %d, want 5", id)
+	}
+}
+
+func TestContextJobID(t *testing.T) {
+	ctx := context.Background()
+
+	// No job ID set
+	if id := GetJobID(ctx); id != "" {
+		t.Errorf("GetJobID() = %q, want empty", id)
+	}
+
+	// With job ID
+	ctx = WithJobID(ctx, "abc123")
+	if id := GetJobID(ctx); id != "abc123" {
+		t.Errorf("GetJobID() = %q, want abc123", id)
+	}
+}
+
+func TestLogPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		workerID int
+		jobID    string
+		want     string
+	}{
+		{"no context", 0, "", ""},
+		{"worker only", 3, "", "[worker-3] "},
+		{"job only", 0, "abc123", "[abc123] "},
+		{"both - job takes precedence", 3, "abc123", "[abc123] "},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.workerID > 0 {
+				ctx = WithWorkerID(ctx, tt.workerID)
+			}
+			if tt.jobID != "" {
+				ctx = WithJobID(ctx, tt.jobID)
+			}
+			got := LogPrefix(ctx)
+			if got != tt.want {
+				t.Errorf("LogPrefix() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAPIError_Error(t *testing.T) {
+	err := &APIError{
+		StatusCode: 404,
+		Message:    "Resource not found",
+	}
+
+	errStr := err.Error()
+	want := "bitbucket API error (status 404): Resource not found"
+	if errStr != want {
+		t.Errorf("Error() = %q, want %q", errStr, want)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		bytes int
+		want  string
+	}{
+		{0, "0 B"},
+		{100, "100 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1048576, "1.0 MB"},
+		{1572864, "1.5 MB"},
+		{1073741824, "1.0 GB"},
+	}
+
+	for _, tt := range tests {
+		got := formatBytes(tt.bytes)
+		if got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
+		}
+	}
+}
+
+func TestClient_WithProgressFunc(t *testing.T) {
+	var progressCalled bool
+	progressFunc := func(completed, total int) {
+		progressCalled = true
+	}
+
+	cfg := testConfig()
+	client := NewClient(cfg, WithProgressFunc(progressFunc))
+
+	if client.progressFunc == nil {
+		t.Error("progressFunc should not be nil")
+	}
+
+	// Call the function to verify it works
+	client.progressFunc(1, 10)
+	if !progressCalled {
+		t.Error("progressFunc was not called")
+	}
+}
+
+func TestClient_WithLogFunc(t *testing.T) {
+	var logCalled bool
+	logFunc := func(format string, args ...interface{}) {
+		logCalled = true
+	}
+
+	cfg := testConfig()
+	client := NewClient(cfg, WithLogFunc(logFunc))
+
+	if client.logFunc == nil {
+		t.Error("logFunc should not be nil")
+	}
+
+	// Call the function to verify it works
+	client.logFunc("test %s", "message")
+	if !logCalled {
+		t.Error("logFunc was not called")
+	}
+}
+
+func TestClient_RateLimiter(t *testing.T) {
+	cfg := testConfig()
+	client := NewClient(cfg)
+
+	rl := client.RateLimiter()
+	if rl == nil {
+		t.Error("RateLimiter() should not return nil")
+	}
+}

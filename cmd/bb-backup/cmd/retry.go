@@ -14,8 +14,10 @@ import (
 )
 
 var (
-	retryMaxRetry int
-	retryClear    bool
+	retryMaxRetry    int
+	retryClear       bool
+	retryInteractive bool
+	retryJSONProgress bool
 )
 
 var retryCmd = &cobra.Command{
@@ -26,10 +28,15 @@ var retryCmd = &cobra.Command{
 This command reads the state file to find repositories that failed
 during the last backup and attempts to back them up again.
 
+Progress output:
+  --interactive    Interactive mode with progress bar and ETA
+  --json-progress  Output progress as JSON lines (for automation)
+
 Examples:
   bb-backup retry-failed -c config.yaml
+  bb-backup retry-failed -i                # Interactive mode with progress bar
   bb-backup retry-failed --retry 3
-  bb-backup retry-failed --clear  # Clear failed list without retrying`,
+  bb-backup retry-failed --clear           # Clear failed list without retrying`,
 	RunE: runRetryFailed,
 }
 
@@ -38,6 +45,8 @@ func init() {
 
 	retryCmd.Flags().IntVar(&retryMaxRetry, "retry", 2, "max retry attempts per repo")
 	retryCmd.Flags().BoolVar(&retryClear, "clear", false, "clear failed repos list without retrying")
+	retryCmd.Flags().BoolVarP(&retryInteractive, "interactive", "i", false, "interactive mode with progress bar and ETA")
+	retryCmd.Flags().BoolVar(&retryJSONProgress, "json-progress", false, "output progress as JSON lines")
 }
 
 func runRetryFailed(_ *cobra.Command, _ []string) error {
@@ -93,7 +102,9 @@ func runRetryFailed(_ *cobra.Command, _ []string) error {
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Println("\nReceived interrupt, shutting down gracefully...")
+		if !retryJSONProgress {
+			fmt.Println("\nReceived interrupt, shutting down gracefully...")
+		}
 		cancel()
 	}()
 
@@ -116,15 +127,21 @@ func runRetryFailed(_ *cobra.Command, _ []string) error {
 	}
 
 	// Create logger
+	// In interactive mode, suppress console output (logs go to file only)
 	logFile := cfg.Logging.File
 	if logFile == "" {
 		logFile = filepath.Join(cfg.Storage.Path, "bb-backup-retry.log")
 	}
+	if retryInteractive && logFile == "" {
+		// Auto-create log file in storage directory for interactive mode
+		logFile = filepath.Join(cfg.Storage.Path, "bb-backup-retry.log")
+	}
+	consoleOutput := logFile != "" && !retryInteractive
 	log, err := logging.New(logging.Config{
 		Level:   effectiveLevel,
 		Format:  cfg.Logging.Format,
 		File:    logFile,
-		Console: !quiet,
+		Console: consoleOutput,
 	})
 	if err != nil {
 		return fmt.Errorf("initializing logger: %w", err)
@@ -133,11 +150,13 @@ func runRetryFailed(_ *cobra.Command, _ []string) error {
 
 	// Create and run backup
 	opts := backup.Options{
-		DryRun:   dryRun,
-		Verbose:  log.IsDebug(),
-		Quiet:    log.IsQuiet(),
-		MaxRetry: retryMaxRetry,
-		Logger:   log,
+		DryRun:       dryRun,
+		Verbose:      log.IsDebug(),
+		Quiet:        log.IsQuiet(),
+		JSONProgress: retryJSONProgress,
+		Interactive:  retryInteractive,
+		MaxRetry:     retryMaxRetry,
+		Logger:       log,
 	}
 
 	b, err := backup.New(cfg, opts)

@@ -405,6 +405,11 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 	var err error
 	var isIncremental bool
 
+	// Update progress to show we're fetching PRs
+	if b.progress != nil && !b.shuttingDown.Load() {
+		b.progress.UpdateStatus(fmt.Sprintf("fetching PRs: %s", repo.Slug))
+	}
+
 	// Check if we can do incremental backup
 	lastPRUpdated := b.state.GetLastPRUpdated(repo.Slug)
 	if !b.opts.Full && lastPRUpdated != "" {
@@ -437,9 +442,15 @@ func (b *Backup) backupPullRequestsWorker(ctx context.Context, repoDir, latestRe
 	count := 0
 	var latestUpdated string
 
-	for _, pr := range prs {
+	totalPRs := len(prs)
+	for i, pr := range prs {
 		if err := ctx.Err(); err != nil {
 			return count, err
+		}
+
+		// Update progress to show PR processing progress
+		if b.progress != nil && !b.shuttingDown.Load() {
+			b.progress.UpdateStatus(fmt.Sprintf("saving PRs: %s (%d/%d)", repo.Slug, i+1, totalPRs))
 		}
 
 		// Track the latest updated_on timestamp
@@ -486,6 +497,10 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 	prSubDir := fmt.Sprintf("%s/%d", prDir, pr.ID)
 
 	if b.cfg.Backup.IncludePRComments {
+		// Update progress to show we're fetching PR comments
+		if b.progress != nil && !b.shuttingDown.Load() {
+			b.progress.UpdateStatus(fmt.Sprintf("PR #%d comments: %s", pr.ID, repoSlug))
+		}
 		comments, err := b.client.GetPullRequestComments(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
@@ -499,6 +514,10 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 	}
 
 	if b.cfg.Backup.IncludePRActivity {
+		// Update progress to show we're fetching PR activity
+		if b.progress != nil && !b.shuttingDown.Load() {
+			b.progress.UpdateStatus(fmt.Sprintf("PR #%d activity: %s", pr.ID, repoSlug))
+		}
 		activity, err := b.client.GetPullRequestActivity(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
 			if !b.shuttingDown.Load() && !isContextCanceled(err) {
@@ -521,6 +540,11 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 	var issues []api.Issue
 	var err error
 	var isIncremental bool
+
+	// Update progress to show we're fetching issues
+	if b.progress != nil && !b.shuttingDown.Load() {
+		b.progress.UpdateStatus(fmt.Sprintf("fetching issues: %s", repo.Slug))
+	}
 
 	// Check if we can do incremental backup
 	lastIssueUpdated := b.state.GetLastIssueUpdated(repo.Slug)
@@ -558,9 +582,15 @@ func (b *Backup) backupIssuesWorker(ctx context.Context, repoDir, latestRepoDir 
 	count := 0
 	var latestUpdated string
 
-	for _, issue := range issues {
+	totalIssues := len(issues)
+	for i, issue := range issues {
 		if err := ctx.Err(); err != nil {
 			return count, err
+		}
+
+		// Update progress to show issue processing progress
+		if b.progress != nil && !b.shuttingDown.Load() {
+			b.progress.UpdateStatus(fmt.Sprintf("saving issues: %s (%d/%d)", repo.Slug, i+1, totalIssues))
 		}
 
 		// Track the latest updated_on timestamp
@@ -602,6 +632,10 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 	}
 
 	if b.cfg.Backup.IncludeIssueComments {
+		// Update progress to show we're fetching issue comments
+		if b.progress != nil && !b.shuttingDown.Load() {
+			b.progress.UpdateStatus(fmt.Sprintf("issue #%d comments: %s", issue.ID, repoSlug))
+		}
 		issueSubDir := fmt.Sprintf("%s/%d", issueDir, issue.ID)
 
 		comments, err := b.client.GetIssueComments(ctx, b.cfg.Workspace, repoSlug, issue.ID)

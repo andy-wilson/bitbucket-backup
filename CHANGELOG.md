@@ -38,7 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `retry-failed` command to retry previously failed repositories
 - Reads failed repos from state file
 - `--clear` flag to clear failed list without retrying
+- `--interactive` / `-i` flag for progress bar mode (same as backup command)
+- `--json-progress` flag for JSON output (same as backup command)
 - Integrates with existing backup infrastructure
+
+#### Metadata Progress Display
+- Shows detailed progress when fetching PRs and issues
+- Displays "fetching PRs: repo-name" when starting PR backup
+- Displays "saving PRs: repo-name (3/10)" during PR processing
+- Shows "PR #123 comments: repo-name" when fetching PR comments
+- Shows "PR #123 activity: repo-name" when fetching PR activity
+- Similar progress for issues and issue comments
+- Progress visible in interactive mode on status line
 
 #### Pure Go Git Implementation
 - Replaced shell exec git operations with go-git library (pure Go)
@@ -76,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Log flushing after each write ensures logs hit disk immediately
 - Timestamped log filenames to preserve history across runs
 - Per-repo job trace IDs (`[abc12345]`) for tracing all operations for a specific repository
-- Uses UUIDv7 (time-ordered) for unique job IDs across backup runs
+- Uses last 8 characters of UUIDv7 (random portion) for uniqueness within same millisecond
 - Worker lifecycle logs still use `[worker-N]` prefix for pool management
 
 #### API Token Authentication

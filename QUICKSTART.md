@@ -224,17 +224,20 @@ This shows a visual progress bar with elapsed time, ETA, and current repository.
 # After a backup with failures, retry just the failed ones
 bb-backup retry-failed
 
+# Retry with interactive progress bar
+bb-backup retry-failed -i
+
 # Clear the failed list without retrying
 bb-backup retry-failed --clear
 ```
 
 ## Restoring from Backup
 
-Repositories are stored as bare git mirrors. To restore:
+Repositories are stored as bare git mirrors in the `latest/` directory. To restore:
 
 ```bash
 # Clone from backup to a working directory
-git clone /backups/workspace/projects/PROJ/repositories/my-repo/repo.git my-repo
+git clone /backups/workspace/latest/projects/PROJ/repositories/my-repo/repo.git my-repo
 
 # Or push to a new remote
 cd my-repo

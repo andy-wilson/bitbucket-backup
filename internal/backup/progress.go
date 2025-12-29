@@ -264,3 +264,15 @@ func (p *Progress) percent() float64 {
 func (p *Progress) GetStats() (completed, failed int) {
 	return int(p.completed.Load()), int(p.failed.Load())
 }
+
+// UpdateStatus updates the current status text without changing progress counts.
+// Used to show metadata fetch progress (e.g., "fetching PRs: repo-name (5/10)").
+func (p *Progress) UpdateStatus(status string) {
+	p.mu.Lock()
+	p.current = status
+	p.mu.Unlock()
+
+	if p.progressBar != nil {
+		p.progressBar.SetCurrent(status)
+	}
+}

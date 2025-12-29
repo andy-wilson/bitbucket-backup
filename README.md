@@ -99,7 +99,7 @@ bb-backup backup [flags]
 | `--git-only` | Only backup git repos (skip PRs, issues, metadata) |
 | `--metadata-only` | Only backup PRs, issues, metadata (skip git) |
 | `--dry-run` | Show what would be backed up without doing it |
-| `--parallel N` | Number of parallel git workers (default: 4) |
+| `--parallel N` | Number of parallel git workers (default: auto-scales 4-16 based on CPU) |
 | `--retry N` | Max retry attempts for failed repos (default: 0) |
 | `-i, --interactive` | Interactive mode with progress bar and ETA |
 | `--json-progress` | Output progress as JSON lines for automation |
@@ -191,11 +191,16 @@ bb-backup retry-failed [flags]
 |------|-------------|
 | `--retry N` | Max retry attempts per repo (default: 2) |
 | `--clear` | Clear failed repos list without retrying |
+| `-i, --interactive` | Interactive mode with progress bar and ETA |
+| `--json-progress` | Output progress as JSON lines for automation |
 
 **Examples:**
 ```bash
 # Retry all failed repos
 bb-backup retry-failed -c config.yaml
+
+# Retry with interactive progress bar
+bb-backup retry-failed -i
 
 # Retry with more attempts
 bb-backup retry-failed --retry 5
