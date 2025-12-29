@@ -102,8 +102,19 @@ func (p *workerPool) worker(ctx context.Context, b *Backup, workerID int) {
 	p.activeWorkers.Add(1)
 	b.log.Debug("[worker-%d] Started (active workers: %d)", workerID, p.activeWorkers.Load())
 
-	for job := range p.jobs {
-		p.processJob(ctx, b, workerID, job)
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled - exit immediately without draining queue
+			b.log.Debug("[worker-%d] Context cancelled, exiting", workerID)
+			return
+		case job, ok := <-p.jobs:
+			if !ok {
+				// Channel closed, no more jobs
+				return
+			}
+			p.processJob(ctx, b, workerID, job)
+		}
 	}
 }
 
