@@ -169,15 +169,27 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 	b.log.Debug("[worker-%d] Processing: %s%s (jobs: %d/%d processed)",
 		workerID, job.repo.Slug, attemptStr, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
 
-	// Update progress with whether this is an update (fetch) or new clone
-	// Check for HEAD file to verify it's a valid git repo (not just an empty directory)
-	// go-git creates repo.git/.git/HEAD, shell git creates repo.git/HEAD
+	// Update progress with operation type
 	if b.progress != nil && !b.shuttingDown.Load() {
-		latestGitPath := b.storage.BasePath() + "/" + b.getLatestGitPath(job.repo)
-		if isValidGitRepo(latestGitPath) {
-			b.progress.StartWithType(job.repo.Slug, "updating")
+		if b.opts.MetadataOnly {
+			// Metadata-only mode: fetching PRs/issues
+			b.progress.StartWithType(job.repo.Slug, "fetching metadata")
+		} else if b.opts.GitOnly {
+			// Git-only mode: check if update or clone
+			latestGitPath := b.storage.BasePath() + "/" + b.getLatestGitPath(job.repo)
+			if isValidGitRepo(latestGitPath) {
+				b.progress.StartWithType(job.repo.Slug, "fetching")
+			} else {
+				b.progress.StartWithType(job.repo.Slug, "cloning")
+			}
 		} else {
-			b.progress.StartWithType(job.repo.Slug, "cloning")
+			// Normal mode: check if update or clone
+			latestGitPath := b.storage.BasePath() + "/" + b.getLatestGitPath(job.repo)
+			if isValidGitRepo(latestGitPath) {
+				b.progress.StartWithType(job.repo.Slug, "updating")
+			} else {
+				b.progress.StartWithType(job.repo.Slug, "cloning")
+			}
 		}
 	}
 
@@ -323,7 +335,8 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 	latestRepoDir := b.getLatestRepoDir(repo)
 
 	// Save repository metadata to both latest and timestamped directories
-	if !b.opts.DryRun {
+	// Skip if git-only mode (metadata-only and normal mode both save metadata)
+	if !b.opts.DryRun && !b.opts.GitOnly {
 		// Save to latest (aggregated)
 		if err := b.saveJSON(latestRepoDir, "repository.json", repo); err != nil {
 			return stats, err
@@ -334,8 +347,8 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 		}
 	}
 
-	// Backup pull requests if enabled
-	if b.cfg.Backup.IncludePRs {
+	// Backup pull requests if enabled (skip in git-only mode)
+	if b.cfg.Backup.IncludePRs && !b.opts.GitOnly {
 		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, latestRepoDir, repo, workerID)
 		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
 			b.log.Error("[worker-%d] Failed to backup PRs for %s: %v", workerID, repo.Slug, err)
@@ -343,8 +356,8 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 		stats.PullRequests = prCount
 	}
 
-	// Backup issues if enabled
-	if b.cfg.Backup.IncludeIssues && repo.HasIssues {
+	// Backup issues if enabled (skip in git-only mode)
+	if b.cfg.Backup.IncludeIssues && repo.HasIssues && !b.opts.GitOnly {
 		issueCount, err := b.backupIssuesWorker(ctx, repoDir, latestRepoDir, repo, workerID)
 		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
 			b.log.Error("[worker-%d] Failed to backup issues for %s: %v", workerID, repo.Slug, err)
@@ -352,9 +365,11 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 		stats.Issues = issueCount
 	}
 
-	// Clone/fetch the git repository
-	if err := b.backupGitRepo(ctx, repoDir, repo, workerID); err != nil {
-		return stats, err
+	// Clone/fetch the git repository (skip in metadata-only mode)
+	if !b.opts.MetadataOnly {
+		if err := b.backupGitRepo(ctx, repoDir, repo, workerID); err != nil {
+			return stats, err
+		}
 	}
 
 	return stats, nil

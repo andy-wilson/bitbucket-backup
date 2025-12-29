@@ -58,6 +58,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimized to fetch repository directly via API (1 call vs paginated list)
 - Useful for testing and targeted backups
 
+#### Separate Git and Metadata Backup Modes
+- New `--git-only` flag to backup only git repositories (skip PRs, issues)
+- New `--metadata-only` flag to backup only PRs, issues, metadata (skip git)
+- Enables fast git-only backups without API rate limiting bottleneck
+- Run metadata backups less frequently or during off-hours
+- Useful for large workspaces where full backups take hours
+
 #### Git Operation Timeout
 - New `git_timeout_minutes` config option (default: 30 minutes)
 - Prevents indefinite hangs on large repository clones

@@ -29,6 +29,8 @@ var (
 	excludeRepos    []string
 	includeRepos    []string
 	singleRepo      string
+	gitOnly         bool
+	metadataOnly    bool
 )
 
 var backupCmd = &cobra.Command{
@@ -44,9 +46,11 @@ This will backup:
   - Issues and comments
 
 Backup modes:
-  --full         Force a full backup (ignore previous state)
-  --incremental  Force incremental (fail if no previous state)
-  (default)      Auto-detect: incremental if state exists, full otherwise
+  --full          Force a full backup (ignore previous state)
+  --incremental   Force incremental (fail if no previous state)
+  --git-only      Only backup git repositories (skip PRs, issues, metadata)
+  --metadata-only Only backup PRs, issues, metadata (skip git operations)
+  (default)       Auto-detect: incremental if state exists, full otherwise
 
 Progress output:
   --interactive    Interactive mode with progress bar and ETA
@@ -66,6 +70,8 @@ Examples:
   bb-backup backup --dry-run
   bb-backup backup --full
   bb-backup backup --incremental
+  bb-backup backup --git-only              # Fast: just git repos, no API calls per repo
+  bb-backup backup --metadata-only         # Slow: just PRs/issues, respects rate limits
   bb-backup backup --repo my-single-repo
   bb-backup backup --exclude "test-*" --exclude "archive-*"
   bb-backup backup --include "core-*" --include "platform-*"`,
@@ -88,9 +94,16 @@ func init() {
 	backupCmd.Flags().StringArrayVar(&excludeRepos, "exclude", nil, "exclude repos matching glob pattern")
 	backupCmd.Flags().StringArrayVar(&includeRepos, "include", nil, "only include repos matching glob pattern")
 	backupCmd.Flags().StringVar(&singleRepo, "repo", "", "backup only a single repository (for testing)")
+	backupCmd.Flags().BoolVar(&gitOnly, "git-only", false, "only backup git repositories (skip PRs, issues)")
+	backupCmd.Flags().BoolVar(&metadataOnly, "metadata-only", false, "only backup PRs, issues, metadata (skip git)")
 }
 
 func runBackup(_ *cobra.Command, _ []string) error {
+	// Validate mutually exclusive flags
+	if gitOnly && metadataOnly {
+		return fmt.Errorf("--git-only and --metadata-only are mutually exclusive")
+	}
+
 	// Load configuration
 	cfg, err := loadConfig()
 	if err != nil {
@@ -153,6 +166,8 @@ func runBackup(_ *cobra.Command, _ []string) error {
 		Interactive:  interactive,
 		MaxRetry:     maxRetry,
 		Logger:       log,
+		GitOnly:      gitOnly,
+		MetadataOnly: metadataOnly,
 	}
 
 	b, err := backup.New(cfg, opts)

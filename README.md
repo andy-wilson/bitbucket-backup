@@ -96,6 +96,8 @@ bb-backup backup [flags]
 | `-o, --output` | Output directory (overrides config) |
 | `--full` | Force full backup (ignore previous state) |
 | `--incremental` | Force incremental (fail if no state exists) |
+| `--git-only` | Only backup git repos (skip PRs, issues, metadata) |
+| `--metadata-only` | Only backup PRs, issues, metadata (skip git) |
 | `--dry-run` | Show what would be backed up without doing it |
 | `--parallel N` | Number of parallel git workers (default: 4) |
 | `--retry N` | Max retry attempts for failed repos (default: 0) |
@@ -124,6 +126,12 @@ bb-backup backup --full
 
 # Incremental only (fails if no previous backup)
 bb-backup backup --incremental
+
+# Git-only: fast backup of just git repos (no API rate limiting)
+bb-backup backup --git-only -i
+
+# Metadata-only: backup PRs/issues separately (slower, API rate limited)
+bb-backup backup --metadata-only
 
 # Filter repositories
 bb-backup backup --include "core-*" --exclude "test-*"

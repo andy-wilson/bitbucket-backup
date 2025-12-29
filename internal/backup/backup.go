@@ -39,6 +39,8 @@ type Options struct {
 	Interactive  bool   // Interactive mode with progress bar
 	MaxRetry     int    // Maximum retry attempts for failed repos
 	Logger       Logger // Optional external logger
+	GitOnly      bool   // Only backup git repositories (skip PRs, issues)
+	MetadataOnly bool   // Only backup PRs, issues (skip git operations)
 }
 
 // Backup orchestrates the backup process.
@@ -187,6 +189,19 @@ func (b *Backup) Run(ctx context.Context) error {
 		b.log.Info("Incremental backup (last: %s)", b.state.LastIncremental)
 	} else {
 		b.log.Info("Full backup")
+	}
+
+	// Log backup scope
+	if b.opts.GitOnly {
+		b.log.Info("Git-only mode: skipping PRs, issues, and metadata")
+		if b.opts.Interactive {
+			fmt.Fprintln(os.Stderr, "Mode: git-only (skipping PRs, issues, metadata)")
+		}
+	} else if b.opts.MetadataOnly {
+		b.log.Info("Metadata-only mode: skipping git operations")
+		if b.opts.Interactive {
+			fmt.Fprintln(os.Stderr, "Mode: metadata-only (skipping git clone/fetch)")
+		}
 	}
 
 	// Create backup directory with timestamp
