@@ -98,11 +98,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added full stack traces to panic logs for easier debugging
 - Helps identify root cause of go-git crashes
 
+#### Shell Git CLI Fallback
+- Automatic fallback to `git` CLI when go-git fails with known issues
+- Detects git CLI availability at startup
+- Retries with shell git for: packfile errors, nil pointer, unexpected EOF
+- Logs fallback attempts for debugging
+- Works transparently - no configuration needed
+
 #### go-git Packfile Fix
 - Uses forked go-git ([andy-wilson/go-git](https://github.com/andy-wilson/go-git)) with nil packfile fix
 - Fixes upstream go-git panic in `decodeObjectAt` and `decodeDeltaObjectAt`
 - Prevents "nil pointer dereference" crashes during clone when processing tags
-- Converts panic into a graceful error that allows backup to continue
+- Converts panic into a graceful error that triggers shell git fallback
 
 ## [0.4.0] - 2025-12-19
 

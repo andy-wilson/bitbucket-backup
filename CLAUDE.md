@@ -42,6 +42,7 @@ This file provides context for Claude Code when working on this project.
 | `internal/config/` | Configuration handling |
 | `internal/git/` | Git operations (clone, fetch) |
 | `internal/git/gogit.go` | Pure Go git implementation using go-git |
+| `internal/git/shell.go` | Shell git CLI fallback implementation |
 | `internal/storage/` | Storage backends (local filesystem) |
 | `internal/ui/` | Terminal UI components (spinner, progress bar) |
 | `internal/ui/progressbar.go` | Interactive progress bar with ETA |
@@ -73,7 +74,7 @@ make clean
 4. **Error handling**: Wrap errors with context using `fmt.Errorf("context: %w", err)`
 5. **Logging**: Use structured logging, never log credentials
 6. **Rate limiting**: Critical - Bitbucket limits to ~1000 req/hour
-7. **No external tools**: All functionality is pure Go (no shell exec)
+7. **Git CLI fallback**: Uses go-git (pure Go) with optional shell git fallback for edge cases
 
 ## Architecture Notes
 
@@ -87,7 +88,8 @@ make clean
 - Single-repo mode (`--repo`) fetches directly via API (optimized)
 - Git operations have configurable timeout (`git_timeout_minutes`)
 - API tokens: email for API calls, username for git operations
-- Pure Go git via go-git library (no external git CLI needed)
+- Pure Go git via go-git library with shell git CLI fallback
+- Automatic fallback to `git` CLI for packfile errors, nil pointer panics
 - Git HTTP transport integrated with API rate limiter
 - Activity spinner for long operations (terminal-only, auto-detected)
 - Interactive progress bar mode (`-i`) with ETA and visual progress

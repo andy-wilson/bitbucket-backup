@@ -32,15 +32,16 @@ type Options struct {
 
 // Backup orchestrates the backup process.
 type Backup struct {
-	cfg       *config.Config
-	opts      Options
-	client    *api.Client
-	storage   storage.Storage
-	log       Logger
-	state     *State
-	filter    *RepoFilter
-	progress  *Progress
-	gitClient *git.GoGitClient
+	cfg            *config.Config
+	opts           Options
+	client         *api.Client
+	storage        storage.Storage
+	log            Logger
+	state          *State
+	filter         *RepoFilter
+	progress       *Progress
+	gitClient      *git.GoGitClient
+	shellGitClient *git.ShellGitClient // Fallback for when go-git fails
 }
 
 // Logger interface for backup logging.
@@ -130,15 +131,28 @@ func New(cfg *config.Config, opts Options) (*Backup, error) {
 		git.WithRateLimit(client.RateLimiter().Wait),
 	)
 
+	// Create shell git client as fallback (may be nil if git CLI not available)
+	var shellGitClient *git.ShellGitClient
+	if git.IsGitCLIAvailable() {
+		shellGitClient = git.NewShellGitClient(
+			git.WithShellCredentials(gitUser, gitPass),
+			git.WithShellLogger(log.Debug),
+		)
+		log.Debug("Git CLI available, will use as fallback for go-git failures")
+	} else {
+		log.Debug("Git CLI not available, no fallback for go-git failures")
+	}
+
 	return &Backup{
-		cfg:       cfg,
-		opts:      opts,
-		client:    client,
-		storage:   store,
-		log:       log,
-		state:     state,
-		filter:    filter,
-		gitClient: gitClient,
+		cfg:            cfg,
+		opts:           opts,
+		client:         client,
+		storage:        store,
+		log:            log,
+		state:          state,
+		filter:         filter,
+		gitClient:      gitClient,
+		shellGitClient: shellGitClient,
 	}, nil
 }
 

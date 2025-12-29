@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -531,7 +532,7 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 	return nil
 }
 
-// backupGitRepo clones or fetches the git repository using go-git.
+// backupGitRepo clones or fetches the git repository using go-git, with shell git fallback.
 func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository, workerID int) error {
 	cloneURL := repo.CloneURL()
 	if cloneURL == "" {
@@ -564,24 +565,93 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	gitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Use go-git for clone/fetch operations
+	// Try go-git first, fall back to shell git if it fails
+	isClone := false
 	if _, err := os.Stat(fullGitPath); os.IsNotExist(err) {
+		isClone = true
+	}
+
+	var goGitErr error
+	if isClone {
 		b.log.Debug("[worker-%d] Cloning %s (mirror, go-git)", workerID, repo.Slug)
-		if err := b.gitClient.CloneMirror(gitCtx, cloneURL, fullGitPath); err != nil {
-			if gitCtx.Err() == context.DeadlineExceeded {
-				return fmt.Errorf("git clone timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
-			}
-			return err
-		}
+		goGitErr = b.gitClient.CloneMirror(gitCtx, cloneURL, fullGitPath)
 	} else {
 		b.log.Debug("[worker-%d] Fetching updates for %s (go-git)", workerID, repo.Slug)
-		if err := b.gitClient.Fetch(gitCtx, fullGitPath); err != nil {
-			if gitCtx.Err() == context.DeadlineExceeded {
-				return fmt.Errorf("git fetch timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
+		goGitErr = b.gitClient.Fetch(gitCtx, fullGitPath)
+	}
+
+	// If go-git succeeded, we're done
+	if goGitErr == nil {
+		return nil
+	}
+
+	// Check for timeout
+	if gitCtx.Err() == context.DeadlineExceeded {
+		if isClone {
+			return fmt.Errorf("git clone timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
+		}
+		return fmt.Errorf("git fetch timed out after %d minutes", b.cfg.Backup.GitTimeoutMinutes)
+	}
+
+	// If shell git is not available, return the go-git error
+	if b.shellGitClient == nil {
+		return goGitErr
+	}
+
+	// Check if this is a go-git specific error that shell git might handle better
+	if !isGoGitRetryableError(goGitErr) {
+		return goGitErr
+	}
+
+	// Try shell git as fallback
+	b.log.Debug("[worker-%d] go-git failed (%v), retrying with git CLI", workerID, goGitErr)
+
+	// Reset context timeout for retry
+	gitCtx2, cancel2 := context.WithTimeout(ctx, timeout)
+	defer cancel2()
+
+	if isClone {
+		// Clean up failed go-git attempt
+		_ = os.RemoveAll(fullGitPath)
+		b.log.Debug("[worker-%d] Cloning %s (mirror, git CLI fallback)", workerID, repo.Slug)
+		if err := b.shellGitClient.CloneMirror(gitCtx2, cloneURL, fullGitPath); err != nil {
+			if gitCtx2.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("git clone timed out after %d minutes (CLI fallback)", b.cfg.Backup.GitTimeoutMinutes)
 			}
-			return err
+			return fmt.Errorf("git CLI fallback also failed: %w (original go-git error: %v)", err, goGitErr)
+		}
+	} else {
+		b.log.Debug("[worker-%d] Fetching updates for %s (git CLI fallback)", workerID, repo.Slug)
+		if err := b.shellGitClient.Fetch(gitCtx2, fullGitPath); err != nil {
+			if gitCtx2.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("git fetch timed out after %d minutes (CLI fallback)", b.cfg.Backup.GitTimeoutMinutes)
+			}
+			return fmt.Errorf("git CLI fallback also failed: %w (original go-git error: %v)", err, goGitErr)
 		}
 	}
 
+	b.log.Debug("[worker-%d] git CLI fallback succeeded for %s", workerID, repo.Slug)
 	return nil
+}
+
+// isGoGitRetryableError checks if an error from go-git is likely to be fixed by using shell git.
+func isGoGitRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Known go-git issues that shell git handles better
+	retryablePatterns := []string{
+		"packfile is nil",
+		"nil pointer",
+		"invalid memory address",
+		"unexpected EOF",
+		"reference delta not found",
+	}
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
 }
