@@ -2,28 +2,33 @@
 
 A CLI tool to backup Bitbucket Cloud workspaces, including git repositories and all associated metadata (projects, pull requests, issues, comments).
 
+This project was born out of frustration at the lack of tools to back up critical data from BitBucket's cloud service. 
+
 ## Features
 
 - **Full repository backup** - Mirror clones of all git repositories
-- **Pure Go implementation** - No external git CLI required (uses go-git)
+
 - **Metadata export** - Pull requests, comments, issues, approvals, activity
-- **Project hierarchy** - Preserves Bitbucket's project structure
-- **Rate limit aware** - Respects Bitbucket API limits with smart backoff
+
+- **Project based hierarchy** - Preserves Bitbucket's project structure
+
 - **Incremental backups** - Only fetch PRs/issues changed since last backup
-- **Parallel processing** - Configurable worker pools for faster backups
+
+- **Parallel processing** - Configurable worker pools for faster backups, within sensible rate limits
+
 - **Repository filtering** - Include/exclude repos by glob patterns
+
 - **Interactive mode** - Progress bar with ETA and real-time status (`-i` flag)
+
 - **Progress reporting** - JSON output for automation (`--json-progress`)
+
 - **Backup verification** - Verify integrity with `git fsck` and JSON validation
+
 - **Graceful shutdown** - CTRL-C safely stops backup without losing progress
-- **Automatic retry** - Retry failed repos with exponential backoff
-- **Cross-platform** - Linux and macOS support
+
+  
 
 ## Installation
-
-### From releases
-
-Download the latest binary from the [Releases](https://github.com/andy-wilson/bb-backup/releases) page.
 
 ### From source
 
@@ -42,7 +47,7 @@ make build
 ### Prerequisites
 
 - Go 1.21+ (for building from source)
-- No external dependencies required (uses pure Go git implementation)
+- git CLI tool as a fallback fo mirroring repos (required for a current isssue with go-git and panics under certain circumstances)
 
 ## Quick Start
 
