@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -93,7 +94,7 @@ func Default() *Config {
 			MaxBackoffSeconds:      300,
 		},
 		Parallelism: ParallelismConfig{
-			GitWorkers: 4,
+			GitWorkers: adaptiveWorkerCount(),
 			APIWorkers: 2,
 		},
 		Backup: BackupConfig{
@@ -148,6 +149,19 @@ func Parse(data []byte) (*Config, error) {
 
 // envVarRegex matches ${VAR_NAME} patterns.
 var envVarRegex = regexp.MustCompile(`\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
+
+// adaptiveWorkerCount returns optimal worker count based on CPU cores.
+// Uses 2x CPU cores (git is I/O bound), clamped between 4 and 16.
+func adaptiveWorkerCount() int {
+	workers := runtime.NumCPU() * 2
+	if workers < 4 {
+		workers = 4
+	}
+	if workers > 16 {
+		workers = 16
+	}
+	return workers
+}
 
 // expandEnvVars replaces ${VAR_NAME} with the value of the environment variable.
 // If the variable is not set, it is replaced with an empty string.

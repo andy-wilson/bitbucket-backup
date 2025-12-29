@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 )
 
 // PullRequest represents a Bitbucket pull request.
@@ -153,18 +154,37 @@ func (c *Client) GetPullRequests(ctx context.Context, workspace, repoSlug, state
 	return prs, nil
 }
 
-// GetAllPullRequests fetches all pull requests in all states.
+// GetAllPullRequests fetches all pull requests in all states concurrently.
 func (c *Client) GetAllPullRequests(ctx context.Context, workspace, repoSlug string) ([]PullRequest, error) {
-	var allPRs []PullRequest
-
-	// Fetch all states
 	states := []string{"OPEN", "MERGED", "DECLINED", "SUPERSEDED"}
-	for _, state := range states {
-		prs, err := c.GetPullRequests(ctx, workspace, repoSlug, state)
-		if err != nil {
-			return nil, err
+
+	type result struct {
+		prs []PullRequest
+		err error
+	}
+
+	results := make([]result, len(states))
+	var wg sync.WaitGroup
+
+	// Fetch all states concurrently
+	for i, state := range states {
+		wg.Add(1)
+		go func(idx int, st string) {
+			defer wg.Done()
+			prs, err := c.GetPullRequests(ctx, workspace, repoSlug, st)
+			results[idx] = result{prs: prs, err: err}
+		}(i, state)
+	}
+
+	wg.Wait()
+
+	// Collect results and check for errors
+	var allPRs []PullRequest
+	for _, r := range results {
+		if r.err != nil {
+			return nil, r.err
 		}
-		allPRs = append(allPRs, prs...)
+		allPRs = append(allPRs, r.prs...)
 	}
 
 	return allPRs, nil

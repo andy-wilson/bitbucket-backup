@@ -18,8 +18,9 @@ func TestDefault(t *testing.T) {
 	if cfg.RateLimit.RequestsPerHour != 900 {
 		t.Errorf("expected rate_limit.requests_per_hour = 900, got %d", cfg.RateLimit.RequestsPerHour)
 	}
-	if cfg.Parallelism.GitWorkers != 4 {
-		t.Errorf("expected parallelism.git_workers = 4, got %d", cfg.Parallelism.GitWorkers)
+	// GitWorkers is now adaptive based on CPU (2x cores, clamped 4-16)
+	if cfg.Parallelism.GitWorkers < 4 || cfg.Parallelism.GitWorkers > 16 {
+		t.Errorf("expected parallelism.git_workers between 4-16, got %d", cfg.Parallelism.GitWorkers)
 	}
 	if cfg.Logging.Level != "info" {
 		t.Errorf("expected logging.level = 'info', got '%s'", cfg.Logging.Level)

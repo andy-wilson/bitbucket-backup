@@ -5,14 +5,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
 // StateFileName is the default state file name.
 const StateFileName = ".bb-backup-state.json"
 
+// CheckpointInterval is the number of repos between state checkpoints.
+const CheckpointInterval = 50
+
 // State tracks the state of previous backups for incremental support.
 type State struct {
+	mu              sync.RWMutex            `json:"-"` // Protects concurrent access
 	Version         string                  `json:"version"`
 	Workspace       string                  `json:"workspace"`
 	LastFullBackup  string                  `json:"last_full_backup,omitempty"`
@@ -78,6 +83,9 @@ func LoadState(path string) (*State, error) {
 
 // Save writes the state to the given path.
 func (s *State) Save(path string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -98,6 +106,8 @@ func (s *State) Save(path string) error {
 
 // MarkFullBackup marks a full backup as completed.
 func (s *State) MarkFullBackup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	now := time.Now().UTC().Format(time.RFC3339)
 	s.LastFullBackup = now
 	s.LastIncremental = now
@@ -105,11 +115,15 @@ func (s *State) MarkFullBackup() {
 
 // MarkIncrementalBackup marks an incremental backup as completed.
 func (s *State) MarkIncrementalBackup() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.LastIncremental = time.Now().UTC().Format(time.RFC3339)
 }
 
 // UpdateProject updates the state for a project.
 func (s *State) UpdateProject(key, uuid string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.Projects[key] = ProjectState{
 		UUID:         uuid,
 		LastBackedUp: time.Now().UTC().Format(time.RFC3339),
@@ -118,6 +132,8 @@ func (s *State) UpdateProject(key, uuid string) {
 
 // UpdateRepository updates the state for a repository.
 func (s *State) UpdateRepository(slug, uuid, projectKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	existing := s.Repositories[slug]
 	s.Repositories[slug] = RepoState{
 		UUID:             uuid,
@@ -131,6 +147,8 @@ func (s *State) UpdateRepository(slug, uuid, projectKey string) {
 
 // SetRepoLastPRUpdated sets the last PR updated timestamp for a repo.
 func (s *State) SetRepoLastPRUpdated(slug, timestamp string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if repo, ok := s.Repositories[slug]; ok {
 		repo.LastPRUpdated = timestamp
 		s.Repositories[slug] = repo
@@ -139,6 +157,8 @@ func (s *State) SetRepoLastPRUpdated(slug, timestamp string) {
 
 // SetRepoLastIssueUpdated sets the last issue updated timestamp for a repo.
 func (s *State) SetRepoLastIssueUpdated(slug, timestamp string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if repo, ok := s.Repositories[slug]; ok {
 		repo.LastIssueUpdated = timestamp
 		s.Repositories[slug] = repo
@@ -147,12 +167,16 @@ func (s *State) SetRepoLastIssueUpdated(slug, timestamp string) {
 
 // GetRepoState returns the state for a repository.
 func (s *State) GetRepoState(slug string) (RepoState, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	state, ok := s.Repositories[slug]
 	return state, ok
 }
 
 // GetLastPRUpdated returns the last PR updated timestamp for incremental backup.
 func (s *State) GetLastPRUpdated(slug string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if repo, ok := s.Repositories[slug]; ok {
 		return repo.LastPRUpdated
 	}
@@ -161,6 +185,8 @@ func (s *State) GetLastPRUpdated(slug string) string {
 
 // GetLastIssueUpdated returns the last issue updated timestamp for incremental backup.
 func (s *State) GetLastIssueUpdated(slug string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if repo, ok := s.Repositories[slug]; ok {
 		return repo.LastIssueUpdated
 	}
@@ -169,11 +195,15 @@ func (s *State) GetLastIssueUpdated(slug string) string {
 
 // HasPreviousBackup returns true if there's a previous backup to build on.
 func (s *State) HasPreviousBackup() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.LastFullBackup != "" || s.LastIncremental != ""
 }
 
 // IsNewRepo returns true if the repo hasn't been backed up before.
 func (s *State) IsNewRepo(slug string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	_, ok := s.Repositories[slug]
 	return !ok
 }
@@ -185,6 +215,8 @@ func GetStatePath(storagePath, workspace string) string {
 
 // AddFailedRepo records a repository that failed to backup.
 func (s *State) AddFailedRepo(slug, projectKey, errMsg string, attempts int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.FailedRepos == nil {
 		s.FailedRepos = make(map[string]FailedRepo)
 	}
@@ -199,6 +231,8 @@ func (s *State) AddFailedRepo(slug, projectKey, errMsg string, attempts int) {
 
 // RemoveFailedRepo removes a repository from the failed list (after successful backup).
 func (s *State) RemoveFailedRepo(slug string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.FailedRepos != nil {
 		delete(s.FailedRepos, slug)
 	}
@@ -206,6 +240,8 @@ func (s *State) RemoveFailedRepo(slug string) {
 
 // GetFailedRepos returns all failed repositories.
 func (s *State) GetFailedRepos() []FailedRepo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.FailedRepos == nil {
 		return nil
 	}
@@ -218,10 +254,14 @@ func (s *State) GetFailedRepos() []FailedRepo {
 
 // HasFailedRepos returns true if there are any failed repositories.
 func (s *State) HasFailedRepos() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return len(s.FailedRepos) > 0
 }
 
 // ClearFailedRepos removes all failed repositories from state.
 func (s *State) ClearFailedRepos() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.FailedRepos = make(map[string]FailedRepo)
 }

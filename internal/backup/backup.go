@@ -2,6 +2,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,6 +19,14 @@ import (
 	"github.com/andy-wilson/bb-backup/internal/git"
 	"github.com/andy-wilson/bb-backup/internal/storage"
 )
+
+// bufferPool is a sync.Pool for reusing bytes.Buffer in JSON marshaling.
+// This reduces GC pressure when marshaling many JSON files.
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
 
 // Options configures the backup behavior.
 type Options struct {
@@ -131,6 +141,7 @@ func New(cfg *config.Config, opts Options) (*Backup, error) {
 		git.WithCredentials(gitUser, gitPass),
 		git.WithLogger(log.Debug),
 		git.WithRateLimit(client.RateLimiter().Wait),
+		git.WithSkipSizeCalc(), // Skip expensive directory size calculation during backup
 	)
 
 	// Create shell git client as fallback (may be nil if git CLI not available)
@@ -420,6 +431,7 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	b.log.Debug("processRepositories: starting result collector")
 	done := make(chan struct{})
 	resultCount := 0
+	statePath := GetStatePath(b.cfg.Storage.Path, b.cfg.Workspace)
 	go func() {
 		for result := range pool.results {
 			pool.markResultRead()
@@ -465,6 +477,15 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 
 				if !b.shuttingDown.Load() && b.progress != nil {
 					b.progress.Complete(result.repo.Slug)
+				}
+			}
+
+			// Periodic state checkpoint for crash recovery
+			if !b.opts.DryRun && resultCount%CheckpointInterval == 0 {
+				if err := b.state.Save(statePath); err != nil {
+					b.log.Debug("State checkpoint failed: %v", err)
+				} else {
+					b.log.Debug("State checkpoint saved (%d repos processed)", resultCount)
 				}
 			}
 		}
@@ -523,15 +544,22 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 }
 
 func (b *Backup) saveJSON(dir, filename string, data interface{}) error {
-	content, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
+	// Get buffer from pool
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+
+	// Use json.Encoder for streaming marshaling
+	encoder := json.NewEncoder(buf)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(data); err != nil {
 		return fmt.Errorf("marshaling JSON: %w", err)
 	}
 
 	fullPath := filepath.Join(dir, filename)
-	b.log.Debug("Writing %s (%s)", fullPath, formatBytes(int64(len(content))))
+	b.log.Debug("Writing %s (%s)", fullPath, formatBytes(int64(buf.Len())))
 
-	return b.storage.Write(fullPath, content)
+	return b.storage.Write(fullPath, buf.Bytes())
 }
 
 // formatBytes formats a byte count as a human-readable string.
@@ -594,29 +622,26 @@ func isContextCanceled(err error) bool {
 }
 
 // countExistingRepos counts how many repos already have a backup (update) vs new.
-func (b *Backup) countExistingRepos(backupDir string, repos []api.Repository, projects []api.Project) (existing, new int) {
-	// Build project key lookup
-	projectByKey := make(map[string]*api.Project)
-	for i := range projects {
-		projectByKey[projects[i].Key] = &projects[i]
-	}
+// Checks the latest directory since that's where git repos are stored.
+func (b *Backup) countExistingRepos(backupDir string, repos []api.Repository, projects []api.Project) (existing, newRepos int) {
+	basePath := b.storage.BasePath()
 
 	for _, repo := range repos {
-		var repoDir string
-		if repo.Project != nil {
-			repoDir = filepath.Join(backupDir, "projects", repo.Project.Key, "repositories", repo.Slug)
+		// Check the latest directory for existing git repos
+		var latestGitDir string
+		if repo.Project != nil && repo.Project.Key != "" {
+			latestGitDir = filepath.Join(basePath, b.cfg.Workspace, "latest", "projects", repo.Project.Key, "repositories", repo.Slug, "repo.git")
 		} else {
-			repoDir = filepath.Join(backupDir, "personal", "repositories", repo.Slug)
+			latestGitDir = filepath.Join(basePath, b.cfg.Workspace, "latest", "personal", "repositories", repo.Slug, "repo.git")
 		}
-		gitDir := filepath.Join(repoDir, "repo.git")
 
-		if _, err := os.Stat(gitDir); err == nil {
+		if _, err := os.Stat(latestGitDir); err == nil {
 			existing++
 		} else {
-			new++
+			newRepos++
 		}
 	}
-	return existing, new
+	return existing, newRepos
 }
 
 // Manifest describes a backup.

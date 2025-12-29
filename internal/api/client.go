@@ -22,6 +22,35 @@ const (
 	DefaultTimeout = 30 * time.Second
 )
 
+// contextKey is a custom type for context keys to avoid collisions.
+type contextKey string
+
+const (
+	// workerIDKey is the context key for worker ID.
+	workerIDKey contextKey = "workerID"
+)
+
+// WithWorkerID returns a context with the worker ID set.
+func WithWorkerID(ctx context.Context, workerID int) context.Context {
+	return context.WithValue(ctx, workerIDKey, workerID)
+}
+
+// GetWorkerID extracts the worker ID from context, returns 0 if not set.
+func GetWorkerID(ctx context.Context) int {
+	if id, ok := ctx.Value(workerIDKey).(int); ok {
+		return id
+	}
+	return 0
+}
+
+// workerPrefix returns a log prefix for the worker ID in context.
+func workerPrefix(ctx context.Context) string {
+	if id := GetWorkerID(ctx); id > 0 {
+		return fmt.Sprintf("[worker-%d] ", id)
+	}
+	return ""
+}
+
 // ProgressFunc is called during pagination to report progress.
 // It receives the current page number and total items fetched so far.
 type ProgressFunc func(page int, itemsSoFar int)
@@ -143,6 +172,7 @@ func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 }
 
 // GetPaginated fetches all pages of a paginated endpoint and returns all values.
+// Uses streaming JSON decoding to reduce memory allocations.
 func (c *Client) GetPaginated(ctx context.Context, path string) ([]json.RawMessage, error) {
 	var allValues []json.RawMessage
 
@@ -158,33 +188,139 @@ func (c *Client) GetPaginated(ctx context.Context, path string) ([]json.RawMessa
 	for currentURL != "" {
 		page++
 
-		body, err := c.doURL(ctx, http.MethodGet, currentURL, nil)
+		resp, nextURL, err := c.getPaginatedPage(ctx, currentURL)
 		if err != nil {
 			return nil, err
 		}
 
-		var resp PaginatedResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			return nil, fmt.Errorf("parsing paginated response: %w", err)
-		}
-
-		// Parse the values array
-		var values []json.RawMessage
-		if err := json.Unmarshal(resp.Values, &values); err != nil {
-			return nil, fmt.Errorf("parsing values array: %w", err)
-		}
-
-		allValues = append(allValues, values...)
+		allValues = append(allValues, resp...)
 
 		// Report progress if callback is set
 		if c.progressFunc != nil {
 			c.progressFunc(page, len(allValues))
 		}
 
-		currentURL = resp.Next
+		currentURL = nextURL
 	}
 
 	return allValues, nil
+}
+
+// getPaginatedPage fetches a single page and returns values + next URL.
+// Uses streaming JSON decoding for efficiency.
+func (c *Client) getPaginatedPage(ctx context.Context, fullURL string) ([]json.RawMessage, string, error) {
+	attempt := 0
+	prefix := workerPrefix(ctx)
+	for {
+		attempt++
+
+		// Wait for rate limiter
+		c.rateLimiter.Wait()
+
+		// Log the request
+		if c.logFunc != nil {
+			c.logFunc("%sAPI %s %s", prefix, http.MethodGet, fullURL)
+		}
+
+		startTime := time.Now()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+		if err != nil {
+			return nil, "", fmt.Errorf("creating request: %w", err)
+		}
+
+		// Set authentication
+		req.SetBasicAuth(c.username, c.password)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, "", fmt.Errorf("executing request: %w", err)
+		}
+		defer resp.Body.Close() //nolint:errcheck // closing response body
+
+		elapsed := time.Since(startTime)
+
+		// Handle rate limiting
+		if resp.StatusCode == http.StatusTooManyRequests {
+			backoff, shouldRetry := c.rateLimiter.OnRateLimited()
+			if !shouldRetry {
+				if c.logFunc != nil {
+					c.logFunc("%s  Rate limited: max retries (%d) reached, giving up", prefix, attempt)
+				}
+				return nil, "", &APIError{
+					StatusCode: resp.StatusCode,
+					Message:    "rate limit exceeded, max retries reached",
+				}
+			}
+
+			// Check for Retry-After header
+			if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+				if seconds, err := strconv.Atoi(retryAfter); err == nil {
+					backoff = time.Duration(seconds) * time.Second
+				}
+			}
+
+			if c.logFunc != nil {
+				c.logFunc("%s  Rate limited: retry %d after %s backoff", prefix, attempt, backoff.Round(time.Second))
+			}
+
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(backoff):
+				continue
+			}
+		}
+
+		// Handle other errors - need to read body for error message
+		if resp.StatusCode >= 400 {
+			respBody, _ := io.ReadAll(resp.Body)
+			var apiErr Error
+			if err := json.Unmarshal(respBody, &apiErr); err == nil && apiErr.Error.Message != "" {
+				return nil, "", &APIError{
+					StatusCode: resp.StatusCode,
+					Message:    apiErr.Error.Message,
+				}
+			}
+			return nil, "", &APIError{
+				StatusCode: resp.StatusCode,
+				Message:    string(respBody),
+			}
+		}
+
+		// Use streaming JSON decoder for success responses
+		decoder := json.NewDecoder(resp.Body)
+
+		var paged PaginatedResponse
+		if err := decoder.Decode(&paged); err != nil {
+			return nil, "", fmt.Errorf("parsing paginated response: %w", err)
+		}
+
+		// Parse the values array
+		var values []json.RawMessage
+		if err := json.Unmarshal(paged.Values, &values); err != nil {
+			return nil, "", fmt.Errorf("parsing values array: %w", err)
+		}
+
+		// Log response details
+		if c.logFunc != nil {
+			c.logFunc("%s  → %d %s (took %s, %d items)", prefix,
+				resp.StatusCode, http.StatusText(resp.StatusCode),
+				elapsed.Round(time.Millisecond), len(values))
+
+			// Log rate limit headers if present
+			if limit := resp.Header.Get("X-RateLimit-Limit"); limit != "" {
+				remaining := resp.Header.Get("X-RateLimit-Remaining")
+				reset := resp.Header.Get("X-RateLimit-Reset")
+				c.logFunc("%s  Rate limit: %s/%s remaining (resets: %s)", prefix, remaining, limit, reset)
+			}
+		}
+
+		// Success
+		c.rateLimiter.OnSuccess()
+		return values, paged.Next, nil
+	}
 }
 
 // do performs an HTTP request with rate limiting and retry logic.
@@ -196,6 +332,7 @@ func (c *Client) do(ctx context.Context, method, path string, body io.Reader) ([
 // doURL performs an HTTP request to an absolute URL.
 func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Reader) ([]byte, error) {
 	attempt := 0
+	prefix := workerPrefix(ctx)
 	for {
 		attempt++
 
@@ -204,7 +341,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 
 		// Log the request
 		if c.logFunc != nil {
-			c.logFunc("API %s %s", method, fullURL)
+			c.logFunc("%sAPI %s %s", prefix, method, fullURL)
 		}
 
 		startTime := time.Now()
@@ -234,7 +371,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 
 		// Log response details
 		if c.logFunc != nil {
-			c.logFunc("  → %d %s (took %s, %s)",
+			c.logFunc("%s  → %d %s (took %s, %s)", prefix,
 				resp.StatusCode, http.StatusText(resp.StatusCode),
 				elapsed.Round(time.Millisecond), formatBytes(len(respBody)))
 
@@ -242,7 +379,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 			if limit := resp.Header.Get("X-RateLimit-Limit"); limit != "" {
 				remaining := resp.Header.Get("X-RateLimit-Remaining")
 				reset := resp.Header.Get("X-RateLimit-Reset")
-				c.logFunc("  Rate limit: %s/%s remaining (resets: %s)", remaining, limit, reset)
+				c.logFunc("%s  Rate limit: %s/%s remaining (resets: %s)", prefix, remaining, limit, reset)
 			}
 		}
 
@@ -251,7 +388,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 			backoff, shouldRetry := c.rateLimiter.OnRateLimited()
 			if !shouldRetry {
 				if c.logFunc != nil {
-					c.logFunc("  Rate limited: max retries (%d) reached, giving up", attempt)
+					c.logFunc("%s  Rate limited: max retries (%d) reached, giving up", prefix, attempt)
 				}
 				return nil, &APIError{
 					StatusCode: resp.StatusCode,
@@ -267,7 +404,7 @@ func (c *Client) doURL(ctx context.Context, method, fullURL string, body io.Read
 			}
 
 			if c.logFunc != nil {
-				c.logFunc("  Rate limited: retry %d after %s backoff", attempt, backoff.Round(time.Second))
+				c.logFunc("%s  Rate limited: retry %d after %s backoff", prefix, attempt, backoff.Round(time.Second))
 			}
 
 			select {

@@ -133,11 +133,11 @@ func runRetryFailed(_ *cobra.Command, _ []string) error {
 
 	// Create and run backup
 	opts := backup.Options{
-		DryRun:       dryRun,
-		Verbose:      log.IsDebug(),
-		Quiet:        log.IsQuiet(),
-		MaxRetry:     retryMaxRetry,
-		Logger:       log,
+		DryRun:   dryRun,
+		Verbose:  log.IsDebug(),
+		Quiet:    log.IsQuiet(),
+		MaxRetry: retryMaxRetry,
+		Logger:   log,
 	}
 
 	b, err := backup.New(cfg, opts)

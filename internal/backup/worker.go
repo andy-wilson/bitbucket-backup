@@ -36,23 +36,23 @@ type repoStats struct {
 
 // workerPool manages concurrent repository backup operations.
 type workerPool struct {
-	workers    int
-	jobs       chan repoJob
-	results    chan repoResult
-	wg         sync.WaitGroup
-	closeOnce  sync.Once
-	jobBuffer  int
-	resBuffer  int
-	maxRetry   int
+	workers   int
+	jobs      chan repoJob
+	results   chan repoResult
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	jobBuffer int
+	resBuffer int
+	maxRetry  int
 	// Instrumentation
-	jobsSubmitted  atomic.Int64
-	jobsProcessed  atomic.Int64
-	jobsRetried    atomic.Int64
-	resultsQueued  atomic.Int64
-	resultsRead    atomic.Int64
-	activeWorkers  atomic.Int64
-	lastActivity   atomic.Int64 // Unix timestamp of last activity
-	logFunc        func(msg string, args ...interface{})
+	jobsSubmitted atomic.Int64
+	jobsProcessed atomic.Int64
+	jobsRetried   atomic.Int64
+	resultsQueued atomic.Int64
+	resultsRead   atomic.Int64
+	activeWorkers atomic.Int64
+	lastActivity  atomic.Int64 // Unix timestamp of last activity
+	logFunc       func(msg string, args ...interface{})
 }
 
 // newWorkerPool creates a new worker pool with the specified number of workers.
@@ -123,6 +123,9 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 	p.jobsProcessed.Add(1)
 	p.lastActivity.Store(time.Now().Unix())
 
+	// Add worker ID to context for API logging
+	ctx = api.WithWorkerID(ctx, workerID)
+
 	var jobErr error
 	var stats repoStats
 
@@ -167,10 +170,10 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 		workerID, job.repo.Slug, attemptStr, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
 
 	// Update progress with whether this is an update (fetch) or new clone
+	// Check the latest directory since that's where git repos are stored
 	if b.progress != nil && !b.shuttingDown.Load() {
-		repoDir := job.baseDir + "/repositories/" + job.repo.Slug
-		gitDir := b.storage.BasePath() + "/" + repoDir + "/repo.git"
-		if _, err := os.Stat(gitDir); err == nil {
+		latestGitPath := b.storage.BasePath() + "/" + b.getLatestGitPath(job.repo)
+		if _, err := os.Stat(latestGitPath); err == nil {
 			b.progress.StartWithType(job.repo.Slug, "updating")
 		} else {
 			b.progress.StartWithType(job.repo.Slug, "cloning")
@@ -313,10 +316,18 @@ func (p *workerPool) closeResults() {
 func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, repo *api.Repository, workerID int) (repoStats, error) {
 	var stats repoStats
 
+	// Timestamped directory for this run's data
 	repoDir := baseDir + "/repositories/" + repo.Slug
+	// Latest directory for aggregated data
+	latestRepoDir := b.getLatestRepoDir(repo)
 
-	// Save repository metadata
+	// Save repository metadata to both latest and timestamped directories
 	if !b.opts.DryRun {
+		// Save to latest (aggregated)
+		if err := b.saveJSON(latestRepoDir, "repository.json", repo); err != nil {
+			return stats, err
+		}
+		// Save to timestamped directory (this run)
 		if err := b.saveJSON(repoDir, "repository.json", repo); err != nil {
 			return stats, err
 		}
@@ -552,7 +563,21 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 	return nil
 }
 
-// backupGitRepo clones or fetches the git repository using go-git, with shell git fallback.
+// getLatestRepoDir returns the path to the latest copy of a repository.
+// The latest directory contains the aggregated/current state of all backups.
+// Structure: <workspace>/latest/projects/<project_key>/repositories/<repo_slug>/
+func (b *Backup) getLatestRepoDir(repo *api.Repository) string {
+	if repo.Project != nil && repo.Project.Key != "" {
+		return b.cfg.Workspace + "/latest/projects/" + repo.Project.Key + "/repositories/" + repo.Slug
+	}
+	return b.cfg.Workspace + "/latest/personal/repositories/" + repo.Slug
+}
+
+// getLatestGitPath returns the shared git repo path in the latest directory.
+func (b *Backup) getLatestGitPath(repo *api.Repository) string {
+	return b.getLatestRepoDir(repo) + "/repo.git"
+}
+
 func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Repository, workerID int) error {
 	cloneURL := repo.CloneURL()
 	if cloneURL == "" {
@@ -560,7 +585,9 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 		return nil
 	}
 
-	gitDir := repoDir + "/repo.git"
+	// Use latest directory for git repos (shared across all backup runs)
+	// This allows repos to be updated incrementally instead of re-cloned
+	latestGitDir := b.getLatestGitPath(repo)
 
 	if b.opts.DryRun {
 		b.log.Info("[worker-%d] [DRY RUN] Would clone %s", workerID, repo.Slug)
@@ -575,7 +602,7 @@ func (b *Backup) backupGitRepo(ctx context.Context, repoDir string, repo *api.Re
 	}
 	b.log.Debug("[worker-%d] Git auth: user=%q, pass=%s, method=%s", workerID, gitUser, maskedPass, b.cfg.Auth.Method)
 
-	fullGitPath := b.storage.BasePath() + "/" + gitDir
+	fullGitPath := b.storage.BasePath() + "/" + latestGitDir
 
 	// Create a context with timeout for git operations
 	timeout := time.Duration(b.cfg.Backup.GitTimeoutMinutes) * time.Minute

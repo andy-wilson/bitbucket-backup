@@ -246,28 +246,40 @@ bb-backup version
 /backups/
 └── my-workspace/
     ├── .bb-backup-state.json      # State file for incremental backups
-    ├── manifest.json              # Backup manifest
-    ├── workspace.json             # Workspace metadata
-    ├── projects/
-    │   └── PROJECT-KEY/
-    │       ├── project.json       # Project metadata
+    ├── latest/                    # Shared git repos (updated incrementally)
+    │   ├── projects/
+    │   │   └── PROJECT-KEY/
+    │   │       └── repositories/
+    │   │           └── repo-name/
+    │   │               └── repo.git/      # Git mirror clone (fetch updates)
+    │   └── personal/
     │       └── repositories/
     │           └── repo-name/
-    │               ├── repo.git/          # Git mirror clone
-    │               ├── repository.json    # Repository metadata
-    │               ├── pull-requests/
-    │               │   ├── 1.json         # PR metadata
-    │               │   └── 1/
-    │               │       ├── comments.json
-    │               │       └── activity.json
-    │               └── issues/
-    │                   ├── 1.json         # Issue metadata
-    │                   └── 1/
-    │                       └── comments.json
-    └── personal/
-        └── repositories/
-            └── personal-repo/
-                └── ...
+    │               └── repo.git/
+    ├── 2024-01-15T10-30-00Z/      # Timestamped backup run
+    │   ├── manifest.json          # Backup manifest
+    │   ├── workspace.json         # Workspace metadata
+    │   ├── projects/
+    │   │   └── PROJECT-KEY/
+    │   │       ├── project.json   # Project metadata
+    │   │       └── repositories/
+    │   │           └── repo-name/
+    │   │               ├── repository.json    # Repository metadata
+    │   │               ├── pull-requests/
+    │   │               │   ├── 1.json         # PR metadata
+    │   │               │   └── 1/
+    │   │               │       ├── comments.json
+    │   │               │       └── activity.json
+    │   │               └── issues/
+    │   │                   ├── 1.json         # Issue metadata
+    │   │                   └── 1/
+    │   │                       └── comments.json
+    │   └── personal/
+    │       └── repositories/
+    │           └── personal-repo/
+    │               └── ...
+    └── 2024-01-16T10-30-00Z/      # Next backup run (metadata only)
+        └── ...
 ```
 
 ## Configuration
@@ -464,17 +476,17 @@ Repositories are backed up as bare git mirror clones (`.git` format). This prese
 
 ```bash
 # Clone from the backup to create a working directory
-git clone /backups/my-workspace/projects/PROJ/repositories/my-repo/repo.git my-repo
+git clone /backups/my-workspace/latest/projects/PROJ/repositories/my-repo/repo.git my-repo
 
 # Or clone as bare repository
-git clone --bare /backups/my-workspace/projects/PROJ/repositories/my-repo/repo.git my-repo.git
+git clone --bare /backups/my-workspace/latest/projects/PROJ/repositories/my-repo/repo.git my-repo.git
 ```
 
 ### Restore to a New Remote
 
 ```bash
 # Clone from backup
-git clone /backups/my-workspace/projects/PROJ/repositories/my-repo/repo.git my-repo
+git clone /backups/my-workspace/latest/projects/PROJ/repositories/my-repo/repo.git my-repo
 cd my-repo
 
 # Change the remote to point to a new location
@@ -491,7 +503,7 @@ git push --tags origin
 #!/bin/bash
 # Script to restore all repos from a backup
 
-BACKUP_DIR="/backups/my-workspace"
+BACKUP_DIR="/backups/my-workspace/latest"
 TARGET_DIR="/restored"
 
 # Find all repo.git directories and clone them
@@ -507,16 +519,16 @@ done
 
 ```bash
 # List all branches in a backup
-git --git-dir=/backups/.../repo.git branch -a
+git --git-dir=/backups/my-workspace/latest/.../repo.git branch -a
 
 # List all tags
-git --git-dir=/backups/.../repo.git tag
+git --git-dir=/backups/my-workspace/latest/.../repo.git tag
 
 # View commit log
-git --git-dir=/backups/.../repo.git log --oneline -20
+git --git-dir=/backups/my-workspace/latest/.../repo.git log --oneline -20
 
 # Show a specific file from a commit
-git --git-dir=/backups/.../repo.git show HEAD:path/to/file.txt
+git --git-dir=/backups/my-workspace/latest/.../repo.git show HEAD:path/to/file.txt
 ```
 
 ### Restoring Metadata

@@ -82,8 +82,12 @@ make clean
 - Config supports environment variable substitution `${VAR_NAME}`
 - Output structure mirrors Bitbucket hierarchy: workspace/project/repo
 - Personal repos (no project) go under `personal/` directory
+- **Latest directory**: Git repos stored in `<workspace>/latest/` for incremental updates
+  - Repos are fetched (updated) instead of re-cloned on subsequent runs
+  - Timestamped directories (`<workspace>/<timestamp>/`) contain metadata only
+  - Structure: `latest/projects/<project>/repositories/<repo>/repo.git`
 - State file (`.bb-backup-state.json`) tracks last backup for incremental support
-- Worker pool enables parallel git operations
+- Worker pool enables parallel git operations with worker ID tracking in logs
 - Filter supports glob patterns for include/exclude
 - Single-repo mode (`--repo`) fetches directly via API (optimized)
 - Git operations have configurable timeout (`git_timeout_minutes`)

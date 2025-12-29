@@ -38,6 +38,7 @@ type GoGitClient struct {
 	rateLimitFunc RateLimitFunc
 	httpClient    *http.Client
 	setupOnce     sync.Once
+	skipSizeCalc  bool // Skip directory size calculation for performance
 }
 
 // GoGitOption configures a GoGitClient.
@@ -69,6 +70,13 @@ func WithProgress(progressFunc ProgressCallback) GoGitOption {
 func WithRateLimit(rateLimitFunc RateLimitFunc) GoGitOption {
 	return func(c *GoGitClient) {
 		c.rateLimitFunc = rateLimitFunc
+	}
+}
+
+// WithSkipSizeCalc disables directory size calculation for performance.
+func WithSkipSizeCalc() GoGitOption {
+	return func(c *GoGitClient) {
+		c.skipSizeCalc = true
 	}
 }
 
@@ -187,8 +195,12 @@ func (c *GoGitClient) CloneMirror(ctx context.Context, repoURL, destPath string)
 
 	if c.logFunc != nil {
 		elapsed := time.Since(startTime)
-		size := getDirSize(destPath)
-		c.logFunc("  Clone completed (took %s, %s)", elapsed.Round(time.Millisecond), formatBytes(size))
+		if c.skipSizeCalc {
+			c.logFunc("  Clone completed (took %s)", elapsed.Round(time.Millisecond))
+		} else {
+			size := getDirSize(destPath)
+			c.logFunc("  Clone completed (took %s, %s)", elapsed.Round(time.Millisecond), formatBytes(size))
+		}
 	}
 
 	return nil
@@ -203,7 +215,10 @@ func (c *GoGitClient) Fetch(ctx context.Context, repoPath string) error {
 		c.logFunc("Git fetch --all --prune %s", repoPath)
 	}
 
-	sizeBefore := getDirSize(repoPath)
+	var sizeBefore int64
+	if !c.skipSizeCalc {
+		sizeBefore = getDirSize(repoPath)
+	}
 
 	// Open the existing repository
 	fs := osfs.New(repoPath)
@@ -242,15 +257,19 @@ func (c *GoGitClient) Fetch(ctx context.Context, repoPath string) error {
 
 	if c.logFunc != nil {
 		elapsed := time.Since(startTime)
-		sizeAfter := getDirSize(repoPath)
-		delta := sizeAfter - sizeBefore
-		deltaStr := ""
-		if delta > 0 {
-			deltaStr = fmt.Sprintf(", +%s", formatBytes(delta))
-		} else if delta < 0 {
-			deltaStr = fmt.Sprintf(", %s", formatBytes(delta))
+		if c.skipSizeCalc {
+			c.logFunc("  Fetch completed (took %s)", elapsed.Round(time.Millisecond))
+		} else {
+			sizeAfter := getDirSize(repoPath)
+			delta := sizeAfter - sizeBefore
+			deltaStr := ""
+			if delta > 0 {
+				deltaStr = fmt.Sprintf(", +%s", formatBytes(delta))
+			} else if delta < 0 {
+				deltaStr = fmt.Sprintf(", %s", formatBytes(delta))
+			}
+			c.logFunc("  Fetch completed (took %s, %s%s)", elapsed.Round(time.Millisecond), formatBytes(sizeAfter), deltaStr)
 		}
-		c.logFunc("  Fetch completed (took %s, %s%s)", elapsed.Round(time.Millisecond), formatBytes(sizeAfter), deltaStr)
 	}
 
 	return nil

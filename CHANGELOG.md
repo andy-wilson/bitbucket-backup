@@ -68,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extensive debug logging throughout backup process
 - Log flushing after each write ensures logs hit disk immediately
 - Timestamped log filenames to preserve history across runs
+- Worker ID prefix in API logs (`[worker-N]`) for tracing parallel operations
 
 #### API Token Authentication
 - Support for Bitbucket API tokens (`api_token` auth method)
@@ -106,6 +107,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Previously workers would drain entire job queue (could take minutes)
 - Only in-progress jobs complete; pending jobs are abandoned
 - Shutdown now completes in seconds instead of minutes
+
+### Performance Optimizations
+
+#### Adaptive Worker Scaling
+- Git workers now auto-scale based on CPU cores (2x cores, clamped 4-16)
+- Previously fixed at 4 workers regardless of machine capabilities
+- Improves throughput on multi-core systems
+
+#### Parallel PR State Fetching
+- Fetches all 4 PR states (OPEN, MERGED, DECLINED, SUPERSEDED) concurrently
+- Previously fetched sequentially, now 4x faster for PR metadata
+
+#### Buffer Pool for JSON Marshaling
+- Reuses buffers via sync.Pool to reduce GC pressure
+- Streaming JSON encoder avoids intermediate byte slice allocations
+- Reduces memory allocations when writing many metadata files
+
+#### Streaming JSON Decoder for API
+- Uses json.Decoder to parse API responses directly from HTTP body
+- Avoids buffering entire response in memory before parsing
+- Reduces memory usage for paginated API requests
+
+#### Skip Directory Size Calculation
+- Directory size calculation disabled during backup operations
+- Previously calculated size after each clone/fetch (expensive I/O)
+- Reduces backup time, especially for many repositories
+
+#### Periodic State Checkpointing
+- State file saved every 50 repositories for crash recovery
+- Previously only saved at end of backup
+- Reduces data loss if backup is interrupted
+
+#### Lock-Free Progress Counters
+- Progress counters use atomic.Int64 for lock-free updates
+- Reduces contention when multiple workers complete simultaneously
+
+#### State File Thread Safety
+- State struct now protected by sync.RWMutex
+- Safe for concurrent access from multiple workers
+
+#### Latest Directory for Git Repos
+- Git repos now stored in `<workspace>/latest/` directory
+- Repos are updated incrementally (fetch) instead of re-cloned each run
+- Timestamped directories (`<workspace>/<timestamp>/`) contain only metadata
+- Dramatically faster backups for subsequent runs
+- Structure: `latest/projects/<project>/repositories/<repo>/repo.git`
+
+#### Accurate Parallel Progress Display
+- Progress bar now shows "N repos in progress" when multiple workers active
+- Previously showed only the most recently started repo (misleading)
+- Correctly tracks active worker count with atomic operations
 
 #### Interrupted Repos Not Counted as Failed
 - Repos interrupted by CTRL-C are now tracked separately from failures
