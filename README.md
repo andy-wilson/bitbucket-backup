@@ -1,4 +1,4 @@
-# bb-backup
+# bitbucket-backup
 
 A CLI tool to backup Bitbucket Cloud workspaces, including git repositories and all associated metadata (projects, pull requests, issues, comments).
 
