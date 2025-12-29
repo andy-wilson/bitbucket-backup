@@ -69,11 +69,18 @@ func (c *ShellGitClient) buildAuthURL(repoURL string) string {
 
 	// Insert credentials into URL
 	// https://bitbucket.org/... -> https://user:pass@bitbucket.org/...
+	// https://user@bitbucket.org/... -> https://user:pass@bitbucket.org/...
 	if strings.HasPrefix(repoURL, "https://") {
+		// Strip existing credentials if present (Bitbucket API often includes username)
+		urlPart := strings.TrimPrefix(repoURL, "https://")
+		if atIndex := strings.Index(urlPart, "@"); atIndex != -1 {
+			// URL has credentials, strip them
+			urlPart = urlPart[atIndex+1:]
+		}
 		return fmt.Sprintf("https://%s:%s@%s",
 			c.username,
 			c.password,
-			strings.TrimPrefix(repoURL, "https://"))
+			urlPart)
 	}
 	return repoURL
 }

@@ -84,3 +84,62 @@ func TestGetVersion(t *testing.T) {
 		t.Errorf("unexpected version format: %s", version)
 	}
 }
+
+func TestShellGitBuildAuthURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		username string
+		password string
+		want     string
+	}{
+		{
+			name:     "plain https url",
+			url:      "https://bitbucket.org/workspace/repo.git",
+			username: "user",
+			password: "pass",
+			want:     "https://user:pass@bitbucket.org/workspace/repo.git",
+		},
+		{
+			name:     "url with existing username (Bitbucket API format)",
+			url:      "https://existinguser@bitbucket.org/workspace/repo.git",
+			username: "user",
+			password: "pass",
+			want:     "https://user:pass@bitbucket.org/workspace/repo.git",
+		},
+		{
+			name:     "url with existing user:pass credentials",
+			url:      "https://olduser:oldpass@bitbucket.org/workspace/repo.git",
+			username: "newuser",
+			password: "newpass",
+			want:     "https://newuser:newpass@bitbucket.org/workspace/repo.git",
+		},
+		{
+			name:     "no credentials provided",
+			url:      "https://existinguser@bitbucket.org/workspace/repo.git",
+			username: "",
+			password: "",
+			want:     "https://existinguser@bitbucket.org/workspace/repo.git",
+		},
+		{
+			name:     "ssh url unchanged",
+			url:      "git@bitbucket.org:workspace/repo.git",
+			username: "user",
+			password: "pass",
+			want:     "git@bitbucket.org:workspace/repo.git",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &ShellGitClient{
+				username: tt.username,
+				password: tt.password,
+			}
+			got := client.buildAuthURL(tt.url)
+			if got != tt.want {
+				t.Errorf("buildAuthURL() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
