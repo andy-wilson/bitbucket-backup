@@ -120,8 +120,11 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 		if r := recover(); r != nil {
 			stack := string(debug.Stack())
 			jobErr = fmt.Errorf("panic recovered in worker: %v", r)
-			b.log.Error("[worker-%d] PANIC while processing %s (attempt %d): %v", workerID, job.repo.Slug, job.attempt+1, r)
-			b.log.Error("[worker-%d] Stack trace:\n%s", workerID, stack)
+			// Only log panics if not shutting down
+			if !b.shuttingDown.Load() {
+				b.log.Error("[worker-%d] PANIC while processing %s (attempt %d): %v", workerID, job.repo.Slug, job.attempt+1, r)
+				b.log.Error("[worker-%d] Stack trace:\n%s", workerID, stack)
+			}
 		}
 
 		// Handle retry or send result
@@ -153,7 +156,7 @@ func (p *workerPool) processJob(ctx context.Context, b *Backup, workerID int, jo
 		workerID, job.repo.Slug, attemptStr, p.jobsProcessed.Load(), p.jobsSubmitted.Load())
 
 	// Update progress with whether this is an update (fetch) or new clone
-	if b.progress != nil {
+	if b.progress != nil && !b.shuttingDown.Load() {
 		repoDir := job.baseDir + "/repositories/" + job.repo.Slug
 		gitDir := b.storage.BasePath() + "/" + repoDir + "/repo.git"
 		if _, err := os.Stat(gitDir); err == nil {
@@ -311,7 +314,7 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 	// Backup pull requests if enabled
 	if b.cfg.Backup.IncludePRs {
 		prCount, err := b.backupPullRequestsWorker(ctx, repoDir, repo, workerID)
-		if err != nil {
+		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
 			b.log.Error("[worker-%d] Failed to backup PRs for %s: %v", workerID, repo.Slug, err)
 		}
 		stats.PullRequests = prCount
@@ -320,7 +323,7 @@ func (b *Backup) backupRepositoryWorker(ctx context.Context, baseDir string, rep
 	// Backup issues if enabled
 	if b.cfg.Backup.IncludeIssues && repo.HasIssues {
 		issueCount, err := b.backupIssuesWorker(ctx, repoDir, repo, workerID)
-		if err != nil {
+		if err != nil && !b.shuttingDown.Load() && !isContextCanceled(err) {
 			b.log.Error("[worker-%d] Failed to backup issues for %s: %v", workerID, repo.Slug, err)
 		}
 		stats.Issues = issueCount
@@ -416,7 +419,9 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 	if b.cfg.Backup.IncludePRComments {
 		comments, err := b.client.GetPullRequestComments(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
-			b.log.Error("  Failed to fetch comments for PR #%d: %v", pr.ID, err)
+			if !b.shuttingDown.Load() && !isContextCanceled(err) {
+				b.log.Error("  Failed to fetch comments for PR #%d: %v", pr.ID, err)
+			}
 		} else if len(comments) > 0 {
 			if err := b.saveJSON(prSubDir, "comments.json", comments); err != nil {
 				b.log.Error("  Failed to save comments for PR #%d: %v", pr.ID, err)
@@ -427,7 +432,9 @@ func (b *Backup) savePR(ctx context.Context, prDir, repoSlug string, pr *api.Pul
 	if b.cfg.Backup.IncludePRActivity {
 		activity, err := b.client.GetPullRequestActivity(ctx, b.cfg.Workspace, repoSlug, pr.ID)
 		if err != nil {
-			b.log.Error("  Failed to fetch activity for PR #%d: %v", pr.ID, err)
+			if !b.shuttingDown.Load() && !isContextCanceled(err) {
+				b.log.Error("  Failed to fetch activity for PR #%d: %v", pr.ID, err)
+			}
 		} else if len(activity) > 0 {
 			if err := b.saveJSON(prSubDir, "activity.json", activity); err != nil {
 				b.log.Error("  Failed to save activity for PR #%d: %v", pr.ID, err)
@@ -521,7 +528,9 @@ func (b *Backup) saveIssue(ctx context.Context, issueDir, repoSlug string, issue
 
 		comments, err := b.client.GetIssueComments(ctx, b.cfg.Workspace, repoSlug, issue.ID)
 		if err != nil {
-			b.log.Error("  Failed to fetch comments for issue #%d: %v", issue.ID, err)
+			if !b.shuttingDown.Load() && !isContextCanceled(err) {
+				b.log.Error("  Failed to fetch comments for issue #%d: %v", issue.ID, err)
+			}
 		} else if len(comments) > 0 {
 			if err := b.saveJSON(issueSubDir, "comments.json", comments); err != nil {
 				b.log.Error("  Failed to save comments for issue #%d: %v", issue.ID, err)

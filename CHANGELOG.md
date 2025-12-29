@@ -94,6 +94,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Previously could hang indefinitely if workers were stuck in long operations
 - Added timeout-based force shutdown after graceful shutdown period
 
+#### Clean Shutdown Output
+- Suppresses noisy "context canceled" error flood on CTRL-C
+- Progress bar stops immediately when shutdown starts
+- Silently counts interrupted repos instead of logging each one
+- Only shows summary at end with interrupted count
+- Previously logged every cancelled operation as an error
+
 #### Interrupted Repos Not Counted as Failed
 - Repos interrupted by CTRL-C are now tracked separately from failures
 - Interrupted repos are NOT added to the failed list in state file

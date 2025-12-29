@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/andy-wilson/bb-backup/internal/api"
@@ -42,6 +43,7 @@ type Backup struct {
 	progress       *Progress
 	gitClient      *git.GoGitClient
 	shellGitClient *git.ShellGitClient // Fallback for when go-git fails
+	shuttingDown   atomic.Bool         // Set when graceful shutdown starts
 }
 
 // Logger interface for backup logging.
@@ -427,15 +429,15 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 				// Check if this was just an interrupt/cancellation (not a real failure)
 				if isContextCanceled(result.err) {
 					stats.Interrupted++
-					b.log.Debug("Backup interrupted for repo %s", result.repo.Slug)
-					if b.progress != nil {
-						b.progress.Interrupt(result.repo.Slug)
-					}
-					// Don't add to failed list - just incomplete, not failed
+					// Don't log each interrupted repo - just count them silently
+					// Don't update progress bar during shutdown (already stopped)
 					continue
 				}
 
-				b.log.Error("Failed to backup repo %s: %v", result.repo.Slug, result.err)
+				// Only log real errors if not shutting down
+				if !b.shuttingDown.Load() {
+					b.log.Error("Failed to backup repo %s: %v", result.repo.Slug, result.err)
+				}
 				stats.Failed++
 
 				// Track failed repo in state
@@ -445,7 +447,7 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 				}
 				b.state.AddFailedRepo(result.repo.Slug, projectKey, result.err.Error(), b.opts.MaxRetry+1)
 
-				if b.progress != nil {
+				if !b.shuttingDown.Load() && b.progress != nil {
 					b.progress.Fail(result.repo.Slug, result.err)
 				}
 			} else {
@@ -461,7 +463,7 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 				b.state.UpdateRepository(result.repo.Slug, result.repo.UUID, projectKey)
 				b.state.RemoveFailedRepo(result.repo.Slug) // Clear from failed list on success
 
-				if b.progress != nil {
+				if !b.shuttingDown.Load() && b.progress != nil {
 					b.progress.Complete(result.repo.Slug)
 				}
 			}
@@ -484,6 +486,14 @@ func (b *Backup) processRepositories(ctx context.Context, backupDir string, repo
 	case <-waitDone:
 		b.log.Debug("processRepositories: workers finished normally")
 	case <-ctx.Done():
+		// Signal shutdown mode - suppresses noisy error logging
+		b.shuttingDown.Store(true)
+
+		// Stop the progress bar immediately to avoid noise
+		if b.progress != nil && b.progress.progressBar != nil {
+			b.progress.progressBar.Stop()
+		}
+
 		b.log.Debug("processRepositories: context cancelled, waiting up to 5s for workers...")
 		select {
 		case <-waitDone:
