@@ -187,6 +187,9 @@ func (b *Backup) Run(ctx context.Context) error {
 
 	if b.opts.Incremental && b.state.HasPreviousBackup() {
 		b.log.Info("Incremental backup (last: %s)", b.state.LastIncremental)
+		if b.opts.Interactive {
+			fmt.Fprintf(os.Stderr, "Mode: incremental (last backup: %s)\n", b.state.LastIncremental)
+		}
 	} else {
 		b.log.Info("Full backup")
 	}
