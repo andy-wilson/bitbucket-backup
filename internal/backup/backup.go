@@ -186,9 +186,14 @@ func (b *Backup) Run(ctx context.Context) error {
 	}
 
 	if b.opts.Incremental && b.state.HasPreviousBackup() {
-		b.log.Info("Incremental backup (last: %s)", b.state.LastIncremental)
+		// Use whichever timestamp is more recent
+		lastBackup := b.state.LastIncremental
+		if b.state.LastFullBackup > lastBackup {
+			lastBackup = b.state.LastFullBackup
+		}
+		b.log.Info("Incremental backup (last: %s)", lastBackup)
 		if b.opts.Interactive {
-			fmt.Fprintf(os.Stderr, "Mode: incremental (last backup: %s)\n", b.state.LastIncremental)
+			fmt.Fprintf(os.Stderr, "Mode: incremental (last backup: %s)\n", lastBackup)
 		}
 	} else {
 		b.log.Info("Full backup")
@@ -367,6 +372,21 @@ func (b *Backup) Run(ctx context.Context) error {
 
 	if b.progress != nil {
 		b.progress.Summary()
+	}
+
+	// List failed repos if any
+	if stats.Failed > 0 {
+		failedRepos := b.state.GetFailedRepos()
+		if len(failedRepos) > 0 {
+			var names []string
+			for _, fr := range failedRepos {
+				names = append(names, fr.Slug)
+			}
+			b.log.Info("Failed repos: %s", strings.Join(names, ", "))
+			if b.opts.Interactive {
+				fmt.Fprintf(os.Stderr, "Failed repos: %s\n", strings.Join(names, ", "))
+			}
+		}
 	}
 
 	return nil

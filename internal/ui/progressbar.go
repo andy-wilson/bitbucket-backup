@@ -31,6 +31,7 @@ type ProgressBar struct {
 	completedList []time.Duration // Track individual completion times for ETA
 	spinnerIdx    int             // Current spinner frame
 	twoLineMode   bool            // Show current repo on separate line above progress bar
+	failedNames   []string        // Names of failed items for display
 }
 
 // ProgressBarOption configures a ProgressBar.
@@ -95,9 +96,10 @@ func (p *ProgressBar) Start() {
 	p.done = make(chan struct{})
 	p.mu.Unlock()
 
-	// In two-line mode, print initial empty line for the status line
+	// In two-line mode, print initial empty lines for status and failed lines
 	if p.twoLineMode {
-		fmt.Fprintln(p.writer, "")
+		fmt.Fprintln(p.writer, "") // Status line
+		fmt.Fprintln(p.writer, "") // Failed repos line (will appear below progress)
 	}
 
 	go p.run()
@@ -143,11 +145,12 @@ func (p *ProgressBar) Complete(name string) {
 	p.mu.Unlock()
 }
 
-// Fail marks an item as failed.
+// Fail marks an item as failed and adds it to the failed list.
 // Note: Does not clear current - caller should manage via SetCurrent.
 func (p *ProgressBar) Fail(name string) {
 	p.mu.Lock()
 	p.failed++
+	p.failedNames = append(p.failedNames, name)
 	p.mu.Unlock()
 }
 
@@ -183,6 +186,8 @@ func (p *ProgressBar) render() {
 	startTime := p.startTime
 	twoLineMode := p.twoLineMode
 	spinnerIdx := p.spinnerIdx
+	failedNames := make([]string, len(p.failedNames))
+	copy(failedNames, p.failedNames)
 	p.spinnerIdx = (p.spinnerIdx + 1) % len(spinnerFrames)
 	p.mu.Unlock()
 
@@ -207,8 +212,8 @@ func (p *ProgressBar) render() {
 	bar := p.buildBar(percent)
 
 	if twoLineMode {
-		// Two-line mode: status line above, progress bar below
-		// Move cursor up, clear line, write status, move down, clear line, write progress
+		// Three-line mode: status line, progress bar, failed repos
+		// Move cursor up 2 lines, then write all three lines
 
 		// Build status line with spinner and current repo
 		statusLine := ""
@@ -232,8 +237,18 @@ func (p *ProgressBar) render() {
 			progressLine += fmt.Sprintf(" ETA: %s (%s)", formatDuration(eta), etaTime.Format("15:04:05"))
 		}
 
-		// Move up, clear, write status, move down, clear, write progress
-		fmt.Fprintf(p.writer, "\033[F\033[K%s\n\033[K%s", statusLine, progressLine)
+		// Build failed line
+		failedLine := ""
+		if len(failedNames) > 0 {
+			failedLine = "✗ Failed: " + strings.Join(failedNames, ", ")
+			// Truncate if too long
+			if len(failedLine) > 100 {
+				failedLine = failedLine[:97] + "..."
+			}
+		}
+
+		// Move up 2 lines, clear and write status, move down, clear and write progress, move down, clear and write failed
+		fmt.Fprintf(p.writer, "\033[2F\033[K%s\n\033[K%s\n\033[K%s", statusLine, progressLine, failedLine)
 	} else {
 		// Single-line mode (original behavior)
 		statusLine := fmt.Sprintf("\r%s %.0f%% (%d/%d", bar, percent, processed, total)
