@@ -145,10 +145,11 @@ func runBackup(_ *cobra.Command, _ []string) error {
 	}
 	consoleOutput := logFile != "" && !interactive
 	log, err := logging.New(logging.Config{
-		Level:   effectiveLevel,
-		Format:  cfg.Logging.Format,
-		File:    logFile,
-		Console: consoleOutput,
+		Level:          effectiveLevel,
+		Format:         cfg.Logging.Format,
+		File:           logFile,
+		Console:        consoleOutput,
+		SuppressStderr: interactive, // In interactive mode, don't print errors to stderr (they break the progress bar)
 	})
 	if err != nil {
 		return fmt.Errorf("initializing logger: %w", err)

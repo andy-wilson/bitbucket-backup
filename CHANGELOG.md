@@ -21,12 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ETA countdown and expected completion timestamp
 - Cleaner output with debug logs going to file only
 
-#### Two-Line Progress Display
+#### Three-Line Progress Display
 - Current repository shown on dedicated line above progress bar
 - Animated spinner (Braille dots) indicates active processing
 - Shows "updating: repo-name" or "cloning: repo-name" with spinner
 - Displays "Complete" when finished, "Waiting..." when idle
-- Clear visual separation between status and progress metrics
+- Failed repos displayed below progress bar as they fail (e.g., "✗ Failed: repo1, repo2")
+- Clear visual separation between status, progress metrics, and failures
+
+#### Incremental Mode Indicator
+- Interactive mode now shows when incremental backup is active
+- Displays "Mode: incremental (last backup: <timestamp>)" before progress starts
+- Helps users understand they're running an incremental vs full backup
+
+#### Failed Repos Summary
+- Comma-separated list of failed repos displayed at end of backup
+- Shown both in logs and interactive mode console output
+- Makes it easy to identify which repos need attention
 
 #### Automatic Retry for Failed Repos
 - New `--retry N` flag to automatically retry failed repos (default: 0)
@@ -96,6 +107,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backward compatibility with deprecated app passwords
 
 ### Fixed
+
+#### Interactive Mode Error Display
+- Errors no longer break the progress bar display in interactive mode
+- Added `SuppressStderr` option to logger for interactive mode
+- Error messages go to log file only when interactive mode is active
+- Failed repos are shown in the dedicated "✗ Failed:" line instead
 
 #### Empty Repository Handling
 - Empty Bitbucket repositories (no commits) are now handled gracefully

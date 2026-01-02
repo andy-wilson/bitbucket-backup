@@ -216,7 +216,11 @@ bb-backup backup --parallel 8
 bb-backup backup -i
 ```
 
-This shows a visual progress bar with elapsed time, ETA, and current repository.
+This shows a visual progress bar with:
+- Elapsed time and ETA with completion timestamp
+- Current repository being processed (with spinner animation)
+- Failed repos displayed immediately below the progress bar
+- Incremental mode indicator when using `--incremental`
 
 ### Retry failed repositories
 

@@ -56,29 +56,32 @@ func ParseLevel(s string) Level {
 
 // Logger is a configurable logger.
 type Logger struct {
-	mu      sync.Mutex
-	level   Level
-	format  string // "text" or "json"
-	output  io.Writer
-	file    *os.File // Keep reference to close later
-	console bool     // Also write to console
+	mu             sync.Mutex
+	level          Level
+	format         string // "text" or "json"
+	output         io.Writer
+	file           *os.File // Keep reference to close later
+	console        bool     // Also write to console
+	suppressStderr bool     // Suppress stderr output for errors (for interactive mode)
 }
 
 // Config holds logger configuration.
 type Config struct {
-	Level   string // "debug", "info", "warn", "error"
-	Format  string // "text" or "json"
-	File    string // Log file path (empty for console only)
-	Console bool   // Also write to console when file is set
+	Level          string // "debug", "info", "warn", "error"
+	Format         string // "text" or "json"
+	File           string // Log file path (empty for console only)
+	Console        bool   // Also write to console when file is set
+	SuppressStderr bool   // Suppress auto-stderr for errors (for interactive mode)
 }
 
 // New creates a new logger from configuration.
 func New(cfg Config) (*Logger, error) {
 	l := &Logger{
-		level:   ParseLevel(cfg.Level),
-		format:  cfg.Format,
-		output:  os.Stdout,
-		console: cfg.Console,
+		level:          ParseLevel(cfg.Level),
+		format:         cfg.Format,
+		output:         os.Stdout,
+		console:        cfg.Console,
+		suppressStderr: cfg.SuppressStderr,
 	}
 
 	if cfg.File != "" {
@@ -159,7 +162,8 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 	}
 
 	// For errors, also write to stderr if we're logging to a file
-	if level == LevelError && l.file != nil && !l.console {
+	// (unless suppressStderr is set for interactive mode)
+	if level == LevelError && l.file != nil && !l.console && !l.suppressStderr {
 		fmt.Fprintf(os.Stderr, "[ERROR] %s\n", formatted)
 	}
 }

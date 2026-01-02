@@ -118,8 +118,13 @@ make clean
 ### Progress & UI
 - Activity spinner for long operations (terminal-only, auto-detected)
 - Interactive progress bar mode (`-i`) with ETA and visual progress
+- Three-line display: status line (spinner + current repo), progress bar, failed repos
+- Failed repos shown immediately below progress bar as they fail
+- Incremental mode indicator shows "Mode: incremental (last backup: timestamp)"
 - Metadata progress shows: "fetching PRs", "saving PRs (3/10)", "PR #123 comments"
+- Failed repos summary at end of backup (comma-separated list)
 - Graceful shutdown on CTRL-C with 5-second timeout
+- Logger `SuppressStderr` option prevents errors breaking progress bar in interactive mode
 
 ## Common Tasks
 

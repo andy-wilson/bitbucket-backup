@@ -18,7 +18,7 @@ This project was born out of frustration at the lack of tools to back up critica
 
 - **Repository filtering** - Include/exclude repos by glob patterns
 
-- **Interactive mode** - Progress bar with ETA and real-time status (`-i` flag)
+- **Interactive mode** - Progress bar with ETA, real-time status, and failed repos display (`-i` flag)
 
 - **Progress reporting** - JSON output for automation (`--json-progress`)
 

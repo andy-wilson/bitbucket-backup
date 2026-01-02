@@ -374,3 +374,46 @@ func TestLogger_ConcurrentAccess(t *testing.T) {
 		t.Error("expected some output from concurrent logging")
 	}
 }
+
+func TestLogger_SuppressStderr(t *testing.T) {
+	tmpDir := t.TempDir()
+	logFile := filepath.Join(tmpDir, "test.log")
+
+	// Test that SuppressStderr flag is properly set
+	cfg := Config{
+		Level:          "info",
+		Format:         "text",
+		File:           logFile,
+		Console:        false,
+		SuppressStderr: true,
+	}
+
+	logger, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer logger.Close()
+
+	if !logger.suppressStderr {
+		t.Error("suppressStderr should be true")
+	}
+
+	// Log an error - with suppressStderr=true, it should only go to file
+	// We can't easily test stderr output, but we can verify the flag is set
+	logger.Error("test error")
+
+	// Verify error was written to file
+	files, _ := os.ReadDir(tmpDir)
+	if len(files) != 1 {
+		t.Fatalf("expected 1 log file, got %d", len(files))
+	}
+
+	content, err := os.ReadFile(filepath.Join(tmpDir, files[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	if !strings.Contains(string(content), "test error") {
+		t.Error("error message not found in log file")
+	}
+}
